@@ -57,9 +57,29 @@ def main():
                 chk(f"pipe_property {c['id']}: material NS", p.material_id == 'NS', f'{p.material_id} (el schedule NS no se relee: la API lo devuelve vacio)')
             else:
                 chk(f"pipe_property {c['id']}: material y schedule", p.material_id == str(c['material_id']) and p.schedule == str(c['schedule']), f'{p.material_id} / {p.schedule}')
-    n_dn = sum(1 for t0, t1 in zip(tramos, tramos[1:]) if t0['DN_mm'] != t1['DN_mm'])
+    nodos = inputs.leer_csv(a.trazado)
+    n_dn = 0
+    for rama in {inputs.rama_tramo(t) for t in tramos}:
+        trs = [t for t in tramos if inputs.rama_tramo(t) == rama]
+        n_dn += sum(1 for t0, t1 in zip(trs, trs[1:]) if t0['DN_mm'] != t1['DN_mm'])
     nred = sum(1 for c in m.all_components if str(c.type).split('.')[-1] == 'REDUCER')
     chk('reductores = cambios de DN', nred == n_dn, f'{nred} de {n_dn}')
+    # una tee se construye una vez: en su rama de origen; el primer y el ultimo nodo de una derivacion solo la referencian
+    n_tee = 0
+    for rama, rn in inputs.agrupar_ramas(nodos).items():
+        for j, n in enumerate(rn):
+            if n['tipo_nodo'].strip() == 'tee' and (rama == inputs.PRINCIPAL or 0 < j < len(rn) - 1):
+                n_tee += 1
+    nte = sum(1 for c in m.all_components if str(c.type).split('.')[-1] == 'TEE')
+    chk('tees = nodos tee construidos', nte == n_tee, f'{nte} de {n_tee}')
+    n_viga = sum(1 for n in nodos if n['tipo_nodo'].strip() == 'soporte_viga')
+    vigas = list(m.all_beams) if hasattr(m, 'all_beams') else []
+    chk('vigas = nodos soporte_viga', len(vigas) == n_viga, f'{len(vigas)} de {n_viga}')
+    if n_viga:
+        sv = cfg['soportes']['viga']
+        sec = {s_.name: s_ for s_ in m.all_sections}.get(sv['seccion']['nombre'])
+        chk('seccion de viga', sec is not None and near(sec.depth * IN, sv['seccion']['profundidad_mm'], 0.01), f'{sec.depth * IN:.1f} mm' if sec else 'no existe')
+        chk('vigas: seccion y beta', all(b.section.name == sv['seccion']['nombre'] for b in vigas), f'beta {sorted({round(b.beta_angle, 1) for b in vigas})} grados (el valor se lee del archivo; la orientacion real se revisa en vista solida)')
 
     # propiedades sobrescritas por clase (HDPE: material_hdpe; otro material: solo si la clase trae 'propiedades'); por id de pipe property
     esperado = {cfg['clases'][k]['id']: inputs.props_clase(cfg, k, cfg['clases'][k]) for k in clases}
@@ -103,14 +123,32 @@ def main():
     for s in sup:
         t = str(s.type).split('.')[-1]
         tipos[t] = tipos.get(t, 0) + 1
-    gs = [s for s in sup if 'GUIDE' in str(s.type)]
+    # las guias conectadas a una viga (connected) son las de los nodos soporte_viga; las demas son las de suelo, pareadas con un Linestop
+    def conectada(s):
+        """En la API `connected` nunca es None: un soporte sin conexion devuelve un Handle invalido que da E2006 al pedir su nombre."""
+        try:
+            return bool(s.connected.name)
+        except Exception:
+            return False
+    gv = [s for s in sup if 'GUIDE' in str(s.type) and conectada(s)]
+    gs = [s for s in sup if 'GUIDE' in str(s.type) and not conectada(s)]
     sc = cfg['soportes']['suelo']
-    chk('Linestop y Guide pareados', tipos.get('LINE_STOP', 0) == tipos.get('GUIDE', 0) > 0, str(tipos))
+    chk('Linestop y Guide de suelo pareados', tipos.get('LINE_STOP', 0) == len(gs) > 0, f'{tipos}; guias de viga {len(gv)}')
+    chk('guias conectadas a viga = vigas', len(gv) == n_viga, f'{len(gv)} de {n_viga}')
     if gs:
         chk('Guide: roce', all(near(s.friction, sc['roce']) for s in gs))
         chk('Guide: gap arriba', all(near(s.gap_up * IN, sc['gap_arriba_mm'], 0.01) for s in gs))
         chk('Guide: gap abajo', all(abs(s.gap_down * IN - sc.get('gap_abajo_mm', 0)) < 0.01 for s in gs))
         chk('Guide: Weightless', all('WEIGHTLESS' in str(s.gap_setting) for s in gs))
+    if gv:
+        g = cfg['soportes']['viga']['guia']
+        def gaps_ok(s):
+            lat = abs(s.gap_left * IN - g['gap_lateral_mm']) < 0.01 + 0.01 * g['gap_lateral_mm']
+            return lat and near(s.gap_up * IN, g['gap_arriba_mm'], 0.01) and abs(s.gap_down * IN - g['gap_abajo_mm']) < 0.01
+        chk('Guide de viga: gaps lateral/arriba/abajo', all(gaps_ok(s) for s in gv))
+        mus = {round(s.friction, 3) for s in gv}
+        esp = {round(float(g['roce']), 3), round(float(g.get('roce_no_hdpe', g['roce'])), 3)}
+        chk('Guide de viga: roce', mus <= esp, f'leidos {sorted(mus)}, esperados {sorted(esp)}')
     chk('anclajes rigidos', sum(1 for a_ in m.all_anchors if a_.rigid) >= 2, f'{len(m.all_anchors)} anclajes')
 
     ls = list(m.all_load_sets)

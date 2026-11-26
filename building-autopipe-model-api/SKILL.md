@@ -1,12 +1,14 @@
 ---
 name: building-autopipe-model-api
-description: Construye con la Python DataAPI de AutoPIPE un modelo .dat de una linea de tuberias HDPE o de acero (u otro material de la libreria, segun material y schedule que indica el usuario) a partir de trazado_general.csv, tabla_tramos.csv y un config_proyecto.json; asigna pipe properties por clase, inserta reductores en los cambios de DN, define soportes de suelo, anclajes, casos presion/temperatura, sismo estatico y analysis sets, y verifica todo leyendo el archivo guardado. Usar cuando se pide generar o regenerar un modelo AutoPIPE por script, crear un .dat con la API, aplicar a un modelo cambios hechos en la GUI o verificar un .dat generado. Se detiene ante discrepancias abiertas, clases sin datos o ramas no soportadas.
+description: Construye con la Python DataAPI de AutoPIPE un modelo .dat de una linea de tuberias HDPE o de acero (u otro material de la libreria, segun material y schedule que indica el usuario) a partir de trazado_general.csv, tabla_tramos.csv y un config_proyecto.json; asigna pipe properties por clase, inserta reductores en los cambios de DN, construye tees, derivaciones y lazos, define soportes de suelo, guias sobre vigas verticales, anclajes, casos presion/temperatura, sismo estatico y analysis sets, y verifica todo leyendo el archivo guardado. Usar cuando se pide generar o regenerar un modelo AutoPIPE por script, crear un .dat con la API, aplicar a un modelo cambios hechos en la GUI o verificar un .dat generado. Se detiene ante discrepancias abiertas, clases sin datos o ramas no soportadas.
 ---
 
 # Construccion de modelos AutoPIPE por API
 
 ## Alcance (esta version)
-- Una rama PRINCIPAL, nodos `extremo`, `soporte`, `vertice_trazado`, `punto`. Tees, ramales, valvulas, bridas y reducciones propias del trazado **no estan implementados**: detenerse e informar; no improvisar.
+- Nodos `extremo`, `soporte`, `vertice_trazado`, `punto`, `tee` y `soporte_viga`. Valvulas, bridas, toberas y reducciones propias del trazado **no estan implementados**: detenerse e informar; no improvisar.
+- **Ramas:** la rama `PRINCIPAL` mas derivaciones (ramales y lazos tipo bypass) que nacen en un nodo `tee`; reglas en [reference/config_schema.md](reference/config_schema.md). Ejemplo: `assets/ejemplo_ramas_*.csv`.
+- **Vigas de soporte:** un nodo `soporte_viga` lleva una guia conectada a una viga vertical anclada al suelo; seccion y material de la viga vienen de la config (obligatorios).
 - Materiales por clase (`material|DN|PN` de la tabla de tramos):
   - **HDPE** (la clave empieza con `HDPE`): material `NS`, propiedades de `material_hdpe` en la config.
   - **Cualquier otro** (acero, etc.): el usuario indica `material_id` de AutoPIPE y `schedule` en la clase; AutoPIPE carga modulo, densidad y expansion de su libreria y la skill no las sobrescribe, salvo que la clase traiga `propiedades`. Si el usuario no da OD ni espesor, AutoPIPE los asigna desde su base segun NPS y schedule (la API los lee como 0: no se verifican); si los da, se escriben y se verifican.
@@ -45,6 +47,8 @@ Los scripts construyen modelos nuevos; para editar uno del usuario:
 - Cualquier linea `DETENERSE Y PREGUNTAR` del preflight o del build.
 - Cambio de DN que cae justo en un nodo (no se sabe donde va el reductor).
 - Una clase que no es HDPE sin `material_id` o `schedule`: preguntar al usuario; no suponer A53-B ni STD.
+- Una derivacion cuyo primer nodo no es una tee ya definida, o una rama sin tramos en la tabla; falta el material o la seccion de la viga.
+- Nunca suponer la orientacion de la viga: el `beta` por defecto (90 grados) es un supuesto sobre la convencion de ejes; avisar que se revise en vista solida.
 - Una limitacion de la API sin sustituto documentado (ver [reference/api_notas.md](reference/api_notas.md)).
 - El usuario pide sobrescribir, o pide algo fuera del alcance.
 

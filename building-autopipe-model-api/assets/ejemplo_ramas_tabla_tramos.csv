@@ -1,0 +1,4 @@
+tramo;rama;desde_m;hasta_m;material;DN_mm;PN;fuente;estado
+T1;PRINCIPAL;0;100;ACERO A53-B;150;CL150;usuario;vigente
+T2;BYP;0;80;ACERO A53-B;150;CL150;usuario;vigente
+T3;RAM;0;30;ACERO A53-B;150;CL150;usuario;vigente

@@ -22,6 +22,9 @@
 - `LoadSet.pipe_contents`: **False = el set incluye el peso del contenido** (se confirmo comparando con el `.DB` de AutoPIPE: Contents_Weight_Included = Yes). El set lleno se escribe con False. Un modelo con el flag al reves da el mismo peso gravitacional en los dos sets.
 - `LoadSet.fluid_density_factor` y `friction_factor` valen 0 si no se asignan (avisos W2164-93 y W2143-76 del `.CHK`): asignarlos despues de `add_load_set`.
 - `PipeProperty.content_weight` es la **densidad del fluido en lb/ft3** (1000 kg/m3 = 62,43), no un peso por longitud: AutoPIPE calcula el peso por longitud con el diametro interior (6,195 lb/in en un DN450 PN16 con agua, contrastado con el modelo de origen). No necesita OD ni espesor para escribirse.
+- `Support.connected` nunca es `None`: un soporte sin conexion devuelve un Handle invalido (E2006 al pedir `.name`). Para saber si una guia esta conectada a una viga, leer `s.connected.name` dentro de un `try`.
+- Derivaciones: `tee.branch.segment = m.add_segment()`; el primer elemento de la derivacion se agrega con `offset` respecto de la tee (no `position`); el cierre de un lazo es `ultimo.link(tee.branch)`. `Tee` y `TeeBranch` tienen `pt_loads` (presion y temperatura por caso). La API acepta el `link` sin comprobar la geometria: la conexion se confirma en la GUI.
+- Vigas: `add_section` necesita los campos de material (densidad, dilatacion, fluencia, rotura, nombre, tipo) o el `.dat` guardado no se reabre; `add_frame_node` x2, `add_beam(i=pie, j=tope, section, beta_angle)`, `pie.add_anchor()` y `soporte.connected = tope`.
 - `pipe_id` se corta a 8 caracteres.
 - Renombrar un componente (`component.name`) no es renombrar su punto: son entidades distintas.
 - El nombre de un codo es su punto de interseccion de tangentes (`bend.tangent`); los puntos `near`, `mid`, `far` se nombran solos (`X N`, `X F`).

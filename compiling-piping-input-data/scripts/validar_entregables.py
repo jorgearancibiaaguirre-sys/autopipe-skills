@@ -56,16 +56,22 @@ def main():
             trazado = filas
 
     n_disc = n_falt = 0
+    def rama_de(f):
+        """Rama de una fila: columna 'rama'; vacia o ausente = PRINCIPAL."""
+        r = (f.get('rama') or '').strip()
+        return 'PRINCIPAL' if r == '' or r.upper() == 'PRINCIPAL' else r
+
     if tabla is not None:
-        prev = None
+        prev_r = {}                       # el empalme se exige dentro de cada rama
         for t in tabla:
             d, h = num(t['desde_m']), num(t['hasta_m'])
             if d is None or h is None or h <= d:
                 err.append(f"tabla_tramos.csv: tramo {t['tramo']} con progresivas invalidas")
                 continue
+            prev = prev_r.get(rama_de(t))
             if prev is not None and abs(d - prev) > TOL_M:
-                err.append(f"tabla_tramos.csv: el tramo {t['tramo']} no empalma con el anterior ({prev} frente a {d})")
-            prev = h
+                err.append(f"tabla_tramos.csv: el tramo {t['tramo']} no empalma con el anterior de su rama ({prev} frente a {d})")
+            prev_r[rama_de(t)] = h
             if t['estado'].strip().lower() not in ESTADOS_OK:
                 err.append(f"tabla_tramos.csv: estado '{t['estado']}' invalido en {t['tramo']} (use vigente o DISCREPANCIA abierta)")
             if t['estado'].strip().lower() == 'discrepancia abierta':
@@ -76,16 +82,31 @@ def main():
             if t['estado'].strip().lower() == 'vigente' and num(t['DN_mm']) is None:
                 err.append(f"tabla_tramos.csv: tramo vigente {t['tramo']} con DN no numerico ('{t['DN_mm']}')")
     if trazado is not None:
-        pr = [num(n['progresiva_m']) for n in trazado]
-        if any(p is None for p in pr) or any(b < a_ for a_, b in zip(pr, pr[1:])):
-            err.append('trazado_general.csv: progresivas no numericas o no crecientes')
-        nombres = [n['punto'] for n in trazado]
-        if len(set(nombres)) != len(nombres):
+        ramas = {}
+        for n in trazado:
+            ramas.setdefault(rama_de(n), []).append(n)
+        for rama, rn in ramas.items():
+            pr = [num(n['progresiva_m']) for n in rn]
+            if any(p is None for p in pr) or any(b < a_ for a_, b in zip(pr, pr[1:])):
+                err.append(f'trazado_general.csv: rama {rama}: progresivas no numericas o no crecientes')
+            if tabla is not None and pr and None not in pr:
+                trs = [t for t in tabla if rama_de(t) == rama]
+                if not trs:
+                    err.append(f"tabla_tramos.csv: la rama {rama} del trazado no tiene tramos")
+                    continue
+                d0, h1 = num(trs[0]['desde_m']), num(trs[-1]['hasta_m'])
+                if d0 is not None and h1 is not None and (abs(d0 - pr[0]) > TOL_M or abs(h1 - pr[-1]) > TOL_M):
+                    err.append(f'rama {rama}: la tabla cubre {d0}-{h1} m y el trazado {pr[0]}-{pr[-1]} m')
+        # un nombre solo puede repetirse como arranque o cierre de una derivacion (la tee de otra rama)
+        tees = {n['punto'] for n in trazado if n['tipo_nodo'].strip() == 'tee'}
+        cuenta = {}
+        for rama, rn in ramas.items():
+            for j, n in enumerate(rn):
+                if rama != 'PRINCIPAL' and n['punto'] in tees and j in (0, len(rn) - 1):
+                    continue
+                cuenta[n['punto']] = cuenta.get(n['punto'], 0) + 1
+        if any(v > 1 for v in cuenta.values()):
             err.append('trazado_general.csv: nombres de punto repetidos')
-        if tabla is not None and pr and None not in pr:
-            d0, h1 = num(tabla[0]['desde_m']), num(tabla[-1]['hasta_m'])
-            if d0 is not None and h1 is not None and (abs(d0 - pr[0]) > TOL_M or abs(h1 - pr[-1]) > TOL_M):
-                err.append(f'la tabla cubre {d0}-{h1} m y el trazado {pr[0]}-{pr[-1]} m')
 
     ruta_res = os.path.join(carp, 'resumen_antecedentes.md')
     if not os.path.exists(ruta_res):

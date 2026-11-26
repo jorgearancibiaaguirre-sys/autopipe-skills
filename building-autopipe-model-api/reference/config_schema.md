@@ -11,12 +11,33 @@ Separador `;`, decimal con punto o coma, UTF-8 con o sin BOM. Los dos CSV los pr
 ## trazado_general.csv
 Columnas: `punto;tipo_nodo;rama;X_m;Y_m;Z_eje_m;progresiva_m`.
 - `Z_eje_m` es la cota del EJE de la tuberia (no del fondo ni del terreno).
-- `tipo_nodo`: `extremo`, `soporte`, `vertice_trazado` (cambio de direccion: se modela como codo), `punto`.
-- `rama`: solo `PRINCIPAL`.
+- `tipo_nodo`: `extremo`, `soporte`, `vertice_trazado` (cambio de direccion: se modela como codo), `punto`, `tee`, `soporte_viga`.
+- `rama`: `PRINCIPAL` o el nombre de una derivacion (ver "Ramas y tees").
 - `progresiva_m` crece a lo largo de la linea y se usa para ubicar los cambios de clase entre nodos.
 
+### Ramas y tees
+- `rama` = `PRINCIPAL` o el nombre de una derivacion. La `PRINCIPAL` va primero en el CSV; las derivaciones, despues de la rama que contiene su tee.
+- Un nodo `tee` crea la tee en su rama y desde ahi nace una derivacion. **La derivacion repite esa tee como su primer nodo** (mismo `punto` y mismas coordenadas, tipo `tee`) y sigue con sus propios nodos; su `progresiva_m` es propia y parte en ese primer nodo.
+- **Lazo (bypass):** si el ultimo nodo de una derivacion repite una tee de otra rama (tipo `tee`), la derivacion se conecta con `link` a esa tee. La conexion no se puede comprobar por lectura de la API: se confirma en la GUI.
+- Una derivacion sin cierre termina en un extremo libre; solo se ancla si su punto se lista en `soportes.anclajes_rigidos_en`.
+- Los nodos `tee` y `soporte_viga` no reciben apoyo de suelo, salvo que `soportes.suelo.aplicar_en_tipos_nodo` los incluya.
+
+### Vigas de soporte (nodo `soporte_viga`)
+Guia en el punto, conectada al tope de una viga vertical `suelo_a_eje_mm` - `altura_viga_mm` bajo el eje; el pie de la viga (a `suelo_a_eje_mm` bajo el eje) lleva un anclaje. Config en `soportes.viga`:
+
+| Campo | Obligatorio | Descripcion |
+|---|---|---|
+| `seccion` | si | `nombre`, `profundidad_mm`, `ancho_mm`, `ala_mm`, `alma_mm` (perfil H; las propiedades de area e inercia se calculan) |
+| `material` | si | `nombre`, `E_MPa`, `poisson`, `densidad_kg_m3`, `dilatacion_1e6_por_C`, `fluencia_MPa`, `rotura_MPa`; sin ellos la API guarda un `.dat` que no se reabre |
+| `altura_viga_mm`, `suelo_a_eje_mm` | si | Altura neta de la viga y distancia del suelo al eje de la tuberia |
+| `guia` | si | `roce`, `gap_lateral_mm`, `gap_arriba_mm`, `gap_abajo_mm`; opcionales `roce_no_hdpe` (para clases que no son HDPE) y `rigidez_transversal_rigida` (por defecto true) |
+| `beta_offset_deg` | no | Giro de la viga respecto del eje de la tuberia (por defecto 90, supuesto: alma colineal con el eje; verificar en vista solida) |
+| `prefijo` | no | Prefijo de los nombres de los nodos y vigas (por defecto `VG`); no debe coincidir con nombres de `punto` |
+
+Ejemplo completo: `assets/config_proyecto_ramas_vigas.example.json`.
+
 ## tabla_tramos.csv
-Columnas: `tramo;desde_m;hasta_m;material;DN_mm;PN;fuente;estado`.
+Columnas: `tramo;desde_m;hasta_m;material;DN_mm;PN;fuente;estado`; columna opcional `rama` (vacia = PRINCIPAL; cada rama tiene sus tramos, que empalman y cubren su propia progresiva).
 - Los tramos empalman (`hasta` de uno = `desde` del siguiente) y cubren toda la linea.
 - `estado` debe ser `vigente`. `DISCREPANCIA abierta` detiene la construccion.
 - La clase de un tramo es la clave `material|DN_mm|PN`, por ejemplo `HDPE PE100|315|PN16`.

@@ -22,7 +22,9 @@ IN = 1 / 25.4               # mm -> in (la API usa pulgadas, lb, psi y F)
 MPA = 145.0377377           # MPa -> psi
 KGM3 = 3.6127292e-5         # kg/m3 -> lb/in3
 KGM3_FT3 = 0.062427961      # kg/m3 -> lb/ft3
-IN100FT = 1200.0            # deformacion unitaria -> in/100 ft (100 ft = 1200 in)
+MM2_IN2 = 645.16            # mm2 por in2 (area, cortante)
+MM4_IN4 = 416231.4          # mm4 por in4 (inercias)
+IN100FT = 1200.0           # deformacion unitaria -> in/100 ft (100 ft = 1200 in)
 LOG = []
 
 
@@ -54,8 +56,9 @@ def main():
     sys.path.insert(0, cfg.get('ruta_dataapi', inputs.DATAAPI_DEFAULT))
     global autopipe
     import autopipe
-    from autopipe.enum import SupportType, GapSetting, LoadCase, SeismicCode, OccasionalLoadType
-    globals().update(SupportType=SupportType, GapSetting=GapSetting, LoadCase=LoadCase, SeismicCode=SeismicCode, OccasionalLoadType=OccasionalLoadType)
+    from autopipe.enum import SupportType, GapSetting, LoadCase, SeismicCode, OccasionalLoadType, SectionShape, SectionType, MaterialType
+    globals().update(SupportType=SupportType, GapSetting=GapSetting, LoadCase=LoadCase, SeismicCode=SeismicCode, OccasionalLoadType=OccasionalLoadType,
+                     SectionShape=SectionShape, SectionType=SectionType, MaterialType=MaterialType)
 
     tmp = tempfile.mkdtemp(prefix='ap_build_')
     base = os.path.join(tmp, 'base.dat')
@@ -108,88 +111,188 @@ def main():
         PP[k], CL[k] = pp, c
         log(f"pipe property {c['id']} <- {k}: " + (f'OD {od} mm, espesor {e} mm' if dims else f"NPS {kw['nominal_diameter']:g} in (OD y espesor: los asigna AutoPIPE)") + f", material {kw['material_id']}, schedule {kw['schedule']}")
 
-    tr = [(num(t['desde_m']), num(t['hasta_m']), inputs.clave_clase(t), float(t['DN_mm'])) for t in tramos]
-    DNC = {k: dn for _, _, k, dn in tr}      # DN por clase: el reductor se inserta cuando cambia el DN, no el OD
+    ramas = inputs.agrupar_ramas(nodos)
+    TR = {}                                  # rama -> [(desde, hasta, clave de clase, DN)]
+    for t in tramos:
+        TR.setdefault(inputs.rama_tramo(t), []).append((num(t['desde_m']), num(t['hasta_m']), inputs.clave_clase(t), float(t['DN_mm'])))
+    DNC = {k: dn for trs in TR.values() for _, _, k, dn in trs}      # DN por clase: el reductor se inserta cuando cambia el DN, no el OD
 
-    def clase_en(p):
-        for d, h, k, dn in tr:
-            if d - inputs.TOL_M <= p <= h + inputs.TOL_M:
-                return k
-        return tr[-1][2]
+    # --- seccion de la viga de soporte (solo si hay nodos soporte_viga). Sin los campos de material la API guarda un .dat que no se reabre (E0).
+    SEC = None
+    vcfg = cfg.get('soportes', {}).get('viga', {})
+    if any(n['tipo_nodo'].strip() == 'soporte_viga' for n in nodos):
+        s_, mt_ = vcfg['seccion'], vcfg['material']
+        d_, b_, tf_, tw_ = (float(s_[x]) for x in ('profundidad_mm', 'ancho_mm', 'ala_mm', 'alma_mm'))
+        A_ = 2 * b_ * tf_ + (d_ - 2 * tf_) * tw_
+        Izz = (b_ * d_ ** 3 - (b_ - tw_) * (d_ - 2 * tf_) ** 3) / 12            # eje fuerte
+        Iyy = 2 * tf_ * b_ ** 3 / 12 + (d_ - 2 * tf_) * tw_ ** 3 / 12           # eje debil
+        J_ = (2 * b_ * tf_ ** 3 + (d_ - 2 * tf_) * tw_ ** 3) / 3
+        SEC = m.add_section(name=s_['nombre'], shape=SectionShape.W, depth=d_ * IN, width=b_ * IN, flange_thickness=tf_ * IN, web_thickness=tw_ * IN,
+                            axial_area=A_ / MM2_IN2, zz_bending=Izz / MM4_IN4, yy_bending=Iyy / MM4_IN4, torsional_inertia=J_ / MM4_IN4,
+                            yy_shear=(d_ - 2 * tf_) * tw_ / MM2_IN2, zz_shear=5 * b_ * tf_ / 3 / MM2_IN2,
+                            young_modulus=mt_['E_MPa'] * MPA, poisson_ratio=mt_['poisson'], density=mt_['densidad_kg_m3'] * KGM3,
+                            thermal_expansion=mt_['dilatacion_1e6_por_C'] * 1e-6 / 1.8, yield_stress=mt_['fluencia_MPa'] * MPA, ultimate_strength=mt_['rotura_MPa'] * MPA,
+                            material_name=mt_['nombre'], material_type=MaterialType.STEEL, type=SectionType.NSTD)
+        log(f"seccion de viga {s_['nombre']}: {d_:g}x{b_:g}, ala {tf_:g}, alma {tw_:g} mm; A={A_:.0f} mm2, Izz={Izz / 1e4:.0f} cm4, Iyy={Iyy / 1e4:.0f} cm4; material {mt_['nombre']}")
 
-    # --- geometria: nodos, estaciones intermedias (cambios de clase y discretizacion), codos y reductores
-    seg = m.add_segment()
     M = 1000 * IN
-    P = [(float(n['X_m']) * M, float(n['Y_m']) * M, float(n['Z_eje_m']) * M) for n in nodos]
-    PR = [float(num(n['progresiva_m'])) for n in nodos]
     rcodo = float(cfg['codo']['radio_en_diametros'])
     Lred = float(cfg['reductor_largo_mm']) * IN
     disc = cfg.get('discretizacion_m')
-    REG = []     # (handle, clase, tipo)  tipo: nodo:<tipo_nodo>, intermedio, bend_near, bend_far, bend_mid, red_near, red_far
-    cur = None
-    nred = 0
-    stn = 0
-    for i, n in enumerate(nodos):
-        tipo = n['tipo_nodo'].strip()
-        if i == 0:
-            cur = m.add_run(name=n['punto'], segment=seg, pipe_property=PP[clase_en(PR[0])], position=P[0])
-            REG.append((cur, clase_en(PR[0]), 'nodo:' + tipo))
-            continue
-        p0, p1 = PR[i - 1], PR[i]
-        L = p1 - p0
-        estac = []
-        for d, h, k, dn in tr[1:]:
-            if p0 + inputs.TOL_M < d < p1 - inputs.TOL_M:
-                estac.append((d, 'limite'))
-        if disc:
-            for j in range(1, int(math.ceil(L / disc))):
-                pj = p0 + j * L / math.ceil(L / disc)
-                estac.append((pj, 'intermedio'))
-        estac.sort()
-        for p, kind in estac:
-            f = (p - p0) / L
-            pos = tuple(P[i - 1][q] + f * (P[i][q] - P[i - 1][q]) for q in range(3))
-            antes, despues = clase_en(p - 2 * inputs.TOL_M), clase_en(p + 2 * inputs.TOL_M)
-            dn_a, dn_d = DNC[antes], DNC[despues]
-            if kind == 'limite' and dn_a != dn_d:
-                nred += 1
-                dirv = [(P[i][q] - P[i - 1][q]) / math.dist(P[i - 1], P[i]) for q in range(3)]
-                rd = cur.add_reducer(name=f'R{nred:02d}', far_pipe_property=PP[despues])
-                rd.near.position = tuple(pos[q] - dirv[q] * Lred / 2 for q in range(3))
-                rd.far.position = tuple(pos[q] + dirv[q] * Lred / 2 for q in range(3))
-                try:
-                    rd.near.pipe_property = PP[antes]
-                except Exception as e:
-                    log(f'  ! pipe_property en el lado near del reductor R{nred:02d}: {str(e)[:70]}')
-                REG += [(rd.near, antes, 'red_near'), (rd.far, despues, 'red_far')]
-                cur = rd
-                log(f'reductor R{nred:02d} en progresiva {p:g} m: {dn_a} -> {dn_d} mm, largo {cfg["reductor_largo_mm"]} mm')
-            else:
-                stn += 1
-                cur = cur.add_run(name=f'S{stn:03d}', position=pos)
-                cur.pipe_property = PP[antes]
-                REG.append((cur, antes, 'intermedio' if kind == 'intermedio' else 'nodo:punto'))
-        k_seg = clase_en((p0 + p1) / 2)
-        # radio del codo: HDPE en multiplos del OD; otro material en multiplos del diametro nominal (codo largo de acero = 1,5 NPS)
-        od_seg = float(CL[k_seg]['od_mm']) if inputs.es_hdpe(k_seg) else inputs.nps_clase(CL[k_seg], DNC[k_seg]) * 25.4
-        es_vertice = tipo == 'vertice_trazado' and 0 < i < len(nodos) - 1
-        if es_vertice:
-            rc = float(CL[k_seg].get('radio_codo_en_diametros', rcodo))   # por clase si el usuario lo fija (p. ej. codo largo de acero = 1,5)
-            b = cur.add_bend(name=n['punto'], position=P[i], radius=rc * od_seg * IN)
-            for ph in (b.near, b.mid, b.tangent, b.far):
-                try:
-                    ph.pipe_property = PP[k_seg]
-                except Exception as e:
-                    log(f"  ! pipe_property en un punto del codo {n['punto']}: {str(e)[:70]}")
-                    break
-            if cfg['codo'].get('factor_flexibilidad') and inputs.es_hdpe(k_seg):
-                b.flexibility_factor = float(cfg['codo']['factor_flexibilidad'])
-            REG += [(b.near, k_seg, 'bend_near'), (b.mid, k_seg, 'bend_mid'), (b.far, k_seg, 'bend_far'), (b.tangent, k_seg, 'bend_vertex')]   # el punto de interseccion de tangentes (nombre del codo) tambien lleva P/T
-            cur = b
+    REG = []     # (handle, clase, tipo)  tipo: nodo:<tipo_nodo>, intermedio, bend_near, bend_far, bend_mid, red_near, red_far, tee_branch
+    TEES = {}    # punto -> (tee, posicion, rama)
+    ESTADO = {'nred': 0, 'stn': 0, 'nviga': 0, 'lazos': 0, 'fallos_lazo': []}
+    EXTREMOS = {}
+
+    class Branch:
+        """Derivacion de una tee aun sin elementos: el primer elemento se coloca por offset respecto de la tee."""
+        def __init__(self, tee, ref):
+            self.tee, self.ref = tee, ref
+
+    def agregar(cur, metodo, name, pos, **kw):
+        if isinstance(cur, Branch):
+            return getattr(cur.tee.branch, metodo)(name=name, offset=tuple(p - q for p, q in zip(pos, cur.ref)), **kw)
+        return getattr(cur, metodo)(name=name, position=pos, **kw)
+
+    def poner_viga(c, rn, i, pos, k):
+        """Guia sobre el punto c, conectada al tope de una viga vertical cuyo pie (anclado) esta a suelo_a_eje_mm bajo el eje."""
+        ESTADO['nviga'] += 1
+        j = ESTADO['nviga']
+        g = vcfg['guia']
+        a_ = rn[i - 1] if i > 0 else rn[i]
+        b_ = rn[i + 1] if i + 1 < len(rn) else rn[i]
+        theta = math.degrees(math.atan2(float(b_['Y_m']) - float(a_['Y_m']), float(b_['X_m']) - float(a_['X_m'])))
+        beta = (theta + float(vcfg.get('beta_offset_deg', 90.0))) % 180.0
+        ztop = pos[2] - (float(vcfg['suelo_a_eje_mm']) - float(vcfg['altura_viga_mm'])) * IN
+        zbot = pos[2] - float(vcfg['suelo_a_eje_mm']) * IN
+        mu = g['roce'] if inputs.es_hdpe(k) else g.get('roce_no_hdpe', g['roce'])
+        kw = dict(type=SupportType.GUIDE, friction=float(mu), gap_left=g['gap_lateral_mm'] * IN, gap_right=g['gap_lateral_mm'] * IN,
+                  gap_up=g['gap_arriba_mm'] * IN, gap_down=g['gap_abajo_mm'] * IN, gap_setting=GapSetting.WEIGHTLESS)
+        if g.get('rigidez_transversal_rigida', True):
+            kw['trans_stiffness'] = -1.0
+        s = c.add_support(**kw)
+        pre = vcfg.get('prefijo', 'VG')
+        ntop = m.add_frame_node(name=f'{pre}T{j:02d}', position=(pos[0], pos[1], ztop))
+        nbot = m.add_frame_node(name=f'{pre}B{j:02d}', position=(pos[0], pos[1], zbot))
+        m.add_beam(name=f'{pre}{j:02d}', i=nbot, j=ntop, section=SEC, beta_angle=beta)
+        nbot.add_anchor()
+        s.connected = ntop
+
+    def construir(rama, rn, inicio):
+        """Construye una rama. inicio=None: primera rama (segmento nuevo); inicio=(tee, pos): derivacion de esa tee."""
+        tr = TR[rama]
+        P = [(float(n['X_m']) * M, float(n['Y_m']) * M, float(n['Z_eje_m']) * M) for n in rn]
+        PR = [float(num(n['progresiva_m'])) for n in rn]
+
+        def clase_en(p):
+            for d, h, k, dn in tr:
+                if d - inputs.TOL_M <= p <= h + inputs.TOL_M:
+                    return k
+            return tr[-1][2]
+
+        cierre = None
+        if rama != inputs.PRINCIPAL and rn[-1]['tipo_nodo'].strip() == 'tee' and rn[-1]['punto'] in TEES and TEES[rn[-1]['punto']][2] != rama:
+            cierre = TEES[rn[-1]['punto']]          # la rama vuelve a una tee de otra rama: lazo
+        fin = len(rn) - 1 if cierre else len(rn)
+        k0 = clase_en(PR[0])
+        if inicio is None:
+            cur = m.add_run(name=rn[0]['punto'], segment=m.add_segment(), pipe_property=PP[k0], position=P[0])
+            REG.append((cur, k0, 'nodo:' + rn[0]['tipo_nodo'].strip()))
+            EXTREMOS[rama] = [cur, cur]
         else:
-            cur = cur.add_run(name=n['punto'], position=P[i])
-            cur.pipe_property = PP[k_seg]
-            REG.append((cur, k_seg, 'nodo:' + tipo))
+            tee, tpos = inicio
+            tee.branch.segment = m.add_segment()
+            tee.branch.pipe_property = PP[k0]
+            REG.append((tee.branch, k0, 'tee_branch'))
+            cur = Branch(tee, tpos)
+        for i in range(1, fin):
+            n = rn[i]
+            tipo = n['tipo_nodo'].strip()
+            p0, p1 = PR[i - 1], PR[i]
+            L = p1 - p0
+            estac = []
+            for d, h, k, dn in tr[1:]:
+                if p0 + inputs.TOL_M < d < p1 - inputs.TOL_M:
+                    estac.append((d, 'limite'))
+            if disc:
+                for j in range(1, int(math.ceil(L / disc))):
+                    estac.append((p0 + j * L / math.ceil(L / disc), 'intermedio'))
+            estac.sort()
+            for p, kind in estac:
+                f = (p - p0) / L
+                pos = tuple(P[i - 1][q] + f * (P[i][q] - P[i - 1][q]) for q in range(3))
+                antes, despues = clase_en(p - 2 * inputs.TOL_M), clase_en(p + 2 * inputs.TOL_M)
+                if kind == 'limite' and DNC[antes] != DNC[despues]:
+                    ESTADO['nred'] += 1
+                    nr = ESTADO['nred']
+                    dirv = [(P[i][q] - P[i - 1][q]) / math.dist(P[i - 1], P[i]) for q in range(3)]
+                    base_c = cur.tee.branch if isinstance(cur, Branch) else cur
+                    rd = base_c.add_reducer(name=f'R{nr:02d}', far_pipe_property=PP[despues])
+                    rd.near.position = tuple(pos[q] - dirv[q] * Lred / 2 for q in range(3))
+                    rd.far.position = tuple(pos[q] + dirv[q] * Lred / 2 for q in range(3))
+                    try:
+                        rd.near.pipe_property = PP[antes]
+                    except Exception as e:
+                        log(f'  ! pipe_property en el lado near del reductor R{nr:02d}: {str(e)[:70]}')
+                    REG.extend([(rd.near, antes, 'red_near'), (rd.far, despues, 'red_far')])
+                    cur = rd
+                    log(f'reductor R{nr:02d} (rama {rama}) en progresiva {p:g} m: DN {DNC[antes]:g} -> {DNC[despues]:g}, largo {cfg["reductor_largo_mm"]} mm')
+                else:
+                    ESTADO['stn'] += 1
+                    cur = agregar(cur, 'add_run', f"S{ESTADO['stn']:03d}", pos)
+                    cur.pipe_property = PP[antes]
+                    REG.append((cur, antes, 'intermedio' if kind == 'intermedio' else 'nodo:punto'))
+            k_seg = clase_en((p0 + p1) / 2)
+            # radio del codo: HDPE en multiplos del OD; otro material en multiplos del diametro nominal (codo largo de acero = 1,5 NPS)
+            od_seg = float(CL[k_seg]['od_mm']) if inputs.es_hdpe(k_seg) else inputs.nps_clase(CL[k_seg], DNC[k_seg]) * 25.4
+            es_vertice = tipo == 'vertice_trazado' and (i < fin - 1 or cierre)
+            if es_vertice:
+                rc = float(CL[k_seg].get('radio_codo_en_diametros', rcodo))
+                b = agregar(cur, 'add_bend', n['punto'], P[i], radius=rc * od_seg * IN)
+                for ph in (b.near, b.mid, b.tangent, b.far):
+                    try:
+                        ph.pipe_property = PP[k_seg]
+                    except Exception as e:
+                        log(f"  ! pipe_property en un punto del codo {n['punto']}: {str(e)[:70]}")
+                        break
+                if cfg['codo'].get('factor_flexibilidad') and inputs.es_hdpe(k_seg):
+                    b.flexibility_factor = float(cfg['codo']['factor_flexibilidad'])
+                REG.extend([(b.near, k_seg, 'bend_near'), (b.mid, k_seg, 'bend_mid'), (b.far, k_seg, 'bend_far'), (b.tangent, k_seg, 'bend_vertex')])
+                cur = b
+            elif tipo == 'tee':
+                tee = agregar(cur, 'add_tee', n['punto'], P[i])
+                tee.pipe_property = PP[k_seg]
+                TEES[n['punto']] = (tee, P[i], rama)
+                REG.append((tee, k_seg, 'nodo:tee'))
+                cur = tee
+            else:
+                cur = agregar(cur, 'add_run', n['punto'], P[i])
+                cur.pipe_property = PP[k_seg]
+                REG.append((cur, k_seg, 'nodo:' + tipo))
+                if tipo == 'soporte_viga':
+                    try:
+                        poner_viga(cur, rn, i, P[i], k_seg)
+                    except Exception as e:
+                        log(f"  ! viga en {n['punto']}: {str(e)[:100]}")
+        if rama in EXTREMOS:
+            EXTREMOS[rama][1] = cur
+        if cierre:
+            try:
+                cur.link(cierre[0].branch)
+                ESTADO['lazos'] += 1
+                log(f"rama {rama}: cierre del lazo con la tee {rn[-1]['punto']} (link a la derivacion de la tee)")
+            except Exception as e:
+                ESTADO['fallos_lazo'].append(rama)
+                log(f"  ! LAZO NO CERRADO en la rama {rama} con la tee {rn[-1]['punto']}: {str(e)[:100]}")
+        return cur
+
+    for rama, rn in ramas.items():
+        if rama == inputs.PRINCIPAL:
+            construir(rama, rn, None)
+        else:
+            tee, tpos, _ = TEES[rn[0]['punto']]
+            log(f"rama {rama}: derivacion de la tee {rn[0]['punto']} ({len(rn)} nodos)")
+            construir(rama, rn, (tee, tpos))
 
     # --- soportes de suelo y anclajes
     s = cfg['soportes']['suelo']
@@ -209,10 +312,12 @@ def main():
         except RuntimeError as e:
             log(f'  ! soporte de suelo: {str(e)[:80]}')
     anc = cfg['soportes'].get('anclajes_rigidos_en', 'extremos')
-    nombres_anc = [REG[0][0], REG[-1][0]] if anc == 'extremos' else [h for h, k, kd in REG if getattr(h, 'name', '') in anc]
+    pr_ext = EXTREMOS[inputs.PRINCIPAL] if inputs.PRINCIPAL in EXTREMOS else []
+    nombres_anc = list(pr_ext) if anc == 'extremos' else [h for h, k, kd in REG if getattr(h, 'name', '') in anc]
     for h in nombres_anc:
         h.add_anchor(rigid=True)
-    log(f'soportes de suelo en {nsup} puntos; anclajes rigidos: {len(nombres_anc)}')
+    nred, nviga = ESTADO['nred'], ESTADO['nviga']
+    log(f'soportes de suelo en {nsup} puntos; anclajes rigidos: {len(nombres_anc)}; ramas: {len(ramas)}; tees: {len(TEES)}; vigas: {nviga}; lazos cerrados: {ESTADO["lazos"]}')
 
     # --- sismo y P/T
     g = cfg.get('sismo_estatico_g', {})
@@ -259,7 +364,12 @@ def main():
         raise SystemExit('La API no genero el .dat (revisar los errores anteriores)')
     shutil.move(os.path.join(tmp, gen[0]), a.out)
     shutil.rmtree(tmp, ignore_errors=True)
-    informe(a.out, cfg, tramos, avisos, nred, nsup, nq)
+    extra = f"ramas: {len(ramas)}; tees: {len(TEES)}; vigas de soporte: {nviga}; lazos cerrados: {ESTADO['lazos']}"
+    if ESTADO['fallos_lazo']:
+        avisos = avisos + [f"LAZO NO CERRADO en la(s) rama(s) {ESTADO['fallos_lazo']}: conectar en la GUI"]
+    if nviga:
+        avisos = avisos + ['orientacion beta de las vigas (alma colineal con el eje de la tuberia) no verificada: revisar en vista solida']
+    informe(a.out, cfg, tramos, avisos, nred, nsup, nq, extra)
     log(f'Modelo escrito en {a.out}')
     r = subprocess.run([sys.executable, os.path.join(HERE, 'verify_model.py'), '--config', a.config, '--tabla', a.tabla, '--trazado', a.trazado, '--modelo', a.out])
     return r.returncode
@@ -270,21 +380,23 @@ def num(s):
 
 
 def cambios_en_nodo(nodos, tramos):
-    """Un cambio de clase que cae justo en un nodo con cambio de DN exigiria decidir donde va el reductor: se pregunta."""
+    """Un cambio de clase que cae justo en un nodo con cambio de DN exigiria decidir donde va el reductor: se pregunta (por rama)."""
     out = []
-    pr = [inputs.num(n['progresiva_m']) for n in nodos]
-    for a_, b_ in zip(tramos, tramos[1:]):
-        dn_a, dn_b = inputs.num(a_['DN_mm']), inputs.num(b_['DN_mm'])
-        h = inputs.num(a_['hasta_m'])
-        if dn_a is not None and dn_b is not None and dn_a != dn_b and h is not None and any(p is not None and abs(p - h) < inputs.TOL_M for p in pr):
-            out.append(f'cambio de DN {dn_a:g}->{dn_b:g} en la progresiva {h:g} coincide con un nodo: indicar donde va el reductor')
+    for rama, rn in inputs.agrupar_ramas(nodos).items():
+        pr = [inputs.num(n['progresiva_m']) for n in rn]
+        trs = [t for t in tramos if inputs.rama_tramo(t) == rama]
+        for a_, b_ in zip(trs, trs[1:]):
+            dn_a, dn_b = inputs.num(a_['DN_mm']), inputs.num(b_['DN_mm'])
+            h = inputs.num(a_['hasta_m'])
+            if dn_a is not None and dn_b is not None and dn_a != dn_b and h is not None and any(p is not None and abs(p - h) < inputs.TOL_M for p in pr):
+                out.append(f'rama {rama}: cambio de DN {dn_a:g}->{dn_b:g} en la progresiva {h:g} coincide con un nodo: indicar donde va el reductor')
     return out
 
 
-def informe(ruta, cfg, tramos, avisos, nred, nsup, nq):
+def informe(ruta, cfg, tramos, avisos, nred, nsup, nq, extra=''):
     txt = [f'# Informe de construccion: {os.path.basename(ruta)}', '',
            f"- Codigo: B31.4 edicion {cfg['codigo']['edicion']}, libreria {cfg['codigo']['libreria_materiales']}",
-           f'- Tramos: {len(tramos)}; reductores insertados: {nred}; puntos con soporte de suelo: {nsup}; cargas sismicas: {nq}',
+           f'- Tramos: {len(tramos)}; reductores insertados: {nred}; puntos con soporte de suelo: {nsup}; cargas sismicas: {nq}', f'- {extra}',
            '- Contenido: en la API pipe_contents=False significa contenido incluido (set LLENO escrito con False)', '', '## FALTANTES / avisos', '']
     txt += [f'- {a}' for a in avisos] or ['- (ninguno)']
     txt += ['', '## Supuestos de la skill (no vienen de las entradas)', '',

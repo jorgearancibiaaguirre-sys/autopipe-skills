@@ -1,0 +1,15 @@
+punto;tipo_nodo;rama;X_m;Y_m;Z_eje_m;progresiva_m
+N1;extremo;PRINCIPAL;0;0;10;0
+N2;soporte_viga;PRINCIPAL;20;0;10;20
+T1;tee;PRINCIPAL;40;0;10;40
+TR;tee;PRINCIPAL;60;0;10;60
+T2;tee;PRINCIPAL;80;0;10;80
+N6;extremo;PRINCIPAL;100;0;10;100
+T1;tee;BYP;40;0;10;0
+B1;vertice_trazado;BYP;40;20;10;20
+B2;soporte_viga;BYP;60;20;10;40
+B3;vertice_trazado;BYP;80;20;10;60
+T2;tee;BYP;80;0;10;80
+TR;tee;RAM;60;0;10;0
+R1;punto;RAM;60;-15;10;15
+R2;extremo;RAM;60;-30;10;30

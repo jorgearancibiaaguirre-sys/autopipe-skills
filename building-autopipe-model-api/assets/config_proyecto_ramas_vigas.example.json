@@ -1,0 +1,97 @@
+{
+ "proyecto": "DEMO-001",
+ "ruta_dataapi": "C:/Program Files/Bentley/AutoPIPE 2025/DataAPI",
+ "codigo": {
+  "edicion": "2019",
+  "libreria_materiales": "B314-19"
+ },
+ "temperatura_montaje_C": 21,
+ "clases": {
+  "ACERO A53-B|150|CL150": {
+   "id": "S150STD",
+   "material_id": "A53-B",
+   "schedule": "STD",
+   "od_mm": 168.3,
+   "espesor_mm": 7.11,
+   "presion_operacion_MPa": 1.9,
+   "radio_codo_en_diametros": 1.5
+  }
+ },
+ "fluido": {
+  "densidad_kg_m3": 1000
+ },
+ "reductor_largo_mm": 400,
+ "discretizacion_m": null,
+ "codo": {
+  "radio_en_diametros": 1.5,
+  "factor_flexibilidad": null
+ },
+ "casos": [
+  {
+   "nombre": "LLENO",
+   "T_C": 5,
+   "presion": "clase",
+   "contenido": true
+  },
+  {
+   "nombre": "VACIO",
+   "T_C": -10,
+   "presion": 0.0,
+   "contenido": false
+  }
+ ],
+ "sismo_estatico_g": {
+  "E1_X": 0.35,
+  "E2_Y": 0.35,
+  "E3_Z": 0.5
+ },
+ "soportes": {
+  "suelo": {
+   "aplicar_en_tipos_nodo": [
+    "extremo",
+    "vertice_trazado",
+    "punto"
+   ],
+   "en_intermedios": true,
+   "roce": 0.6,
+   "gap_lateral_mm": 0,
+   "gap_arriba_mm": 5000,
+   "gap_abajo_mm": 0
+  },
+  "anclajes_rigidos_en": "extremos",
+  "viga": {
+   "seccion": {
+    "nombre": "HN250",
+    "profundidad_mm": 250,
+    "ancho_mm": 250,
+    "ala_mm": 25,
+    "alma_mm": 12
+   },
+   "material": {
+    "nombre": "A36",
+    "E_MPa": 200000,
+    "poisson": 0.3,
+    "densidad_kg_m3": 7850,
+    "dilatacion_1e6_por_C": 11.7,
+    "fluencia_MPa": 250,
+    "rotura_MPa": 400
+   },
+   "altura_viga_mm": 360,
+   "suelo_a_eje_mm": 610,
+   "beta_offset_deg": 90,
+   "guia": {
+    "roce": 0.6,
+    "roce_no_hdpe": 0.8,
+    "gap_lateral_mm": 5,
+    "gap_arriba_mm": 5,
+    "gap_abajo_mm": 0
+   }
+  }
+ },
+ "analisis": {
+  "friction_scale_factor": 1.0,
+  "fluid_density_factor_lleno": 1.0,
+  "no_lineal": false,
+  "iteraciones": 30
+ }
+}

@@ -9,7 +9,9 @@ import os
 
 # Version de la DataAPI contra la que se probo la skill. No es una restriccion: solo se informa si difiere.
 DATAAPI_DEFAULT = 'C:/Program Files/Bentley/AutoPIPE 2025/DataAPI'
-TIPOS_NODO_SOPORTADOS = {'extremo', 'soporte', 'vertice_trazado', 'punto'}
+PRINCIPAL = 'PRINCIPAL'
+# 'tee': nace una derivacion; 'soporte_viga': guia conectada a una viga vertical anclada al suelo (en vez del apoyo de suelo)
+TIPOS_NODO_SOPORTADOS = {'extremo', 'soporte', 'vertice_trazado', 'punto', 'tee', 'soporte_viga'}
 COLS_TRAZADO = ['punto', 'tipo_nodo', 'rama', 'X_m', 'Y_m', 'Z_eje_m', 'progresiva_m']
 COLS_TABLA = ['tramo', 'desde_m', 'hasta_m', 'material', 'DN_mm', 'PN', 'fuente', 'estado']
 ID_MAX = 8            # AutoPIPE corta pipe_id a 8 caracteres (verificado en la linea base)
@@ -47,6 +49,27 @@ def num(s):
 def clave_clase(t):
     """Clave de clase = 'material|DN|PN' (la misma que usa config_proyecto.json en 'clases')."""
     return f"{t['material'].strip()}|{str(t['DN_mm']).strip()}|{t['PN'].strip()}"
+
+
+def rama_nodo(n):
+    r = (n.get('rama') or '').strip()
+    return PRINCIPAL if r == '' or r.upper() == PRINCIPAL else r
+
+
+def rama_tramo(t):
+    """Rama de un tramo: columna opcional 'rama' de tabla_tramos.csv; vacia o ausente = PRINCIPAL."""
+    r = (t.get('rama') or '').strip()
+    return PRINCIPAL if r == '' or r.upper() == PRINCIPAL else r
+
+
+def agrupar_ramas(nodos):
+    """dict rama -> lista de nodos, en el orden del CSV (la rama PRINCIPAL primero si existe)."""
+    out = {}
+    for n in nodos:
+        out.setdefault(rama_nodo(n), []).append(n)
+    if PRINCIPAL in out:
+        out = {PRINCIPAL: out[PRINCIPAL], **{k: v for k, v in out.items() if k != PRINCIPAL}}
+    return out
 
 
 def es_hdpe(clave):
@@ -90,32 +113,89 @@ def validar(cfg, nodos, tramos):
     if len(nodos) < 2:
         stops.append('trazado_general.csv: se necesitan al menos 2 nodos')
     for n in nodos:
-        if n['rama'].strip().upper() != 'PRINCIPAL':
-            stops.append(f"nodo {n['punto']}: rama {n['rama']} no soportada (solo PRINCIPAL; tees y ramales no estan implementados)")
         if n['tipo_nodo'].strip() not in TIPOS_NODO_SOPORTADOS:
             stops.append(f"nodo {n['punto']}: tipo_nodo '{n['tipo_nodo']}' no soportado ({sorted(TIPOS_NODO_SOPORTADOS)})")
     nombres = [n['punto'] for n in nodos]
-    if len(set(nombres)) != len(nombres):
-        stops.append('trazado_general.csv: nombres de punto repetidos')
-    # tabla de tramos: estado, continuidad, cobertura
-    prev_hasta = None
-    for t in tramos:
-        if not t['estado'].strip().lower().startswith('vigente'):
-            stops.append(f"tramo {t['tramo']}: estado '{t['estado']}' (resolver la discrepancia en la compilacion de antecedentes antes de modelar)")
-        d, h = num(t['desde_m']), num(t['hasta_m'])
-        if d is None or h is None or h <= d:
-            stops.append(f"tramo {t['tramo']}: progresivas invalidas ({t['desde_m']}-{t['hasta_m']})")
+    ramas = agrupar_ramas(nodos)
+    ref_rama = {}           # punto de tee -> rama donde esta definida (para validar el arranque y el cierre de las otras ramas)
+    if PRINCIPAL not in ramas:
+        stops.append("trazado_general.csv: no hay nodos de la rama PRINCIPAL")
+    # un punto puede repetirse solo como arranque o cierre de una rama (mismo nombre que su tee); fuera de eso, nombres unicos
+    for rama, rn in ramas.items():
+        for j, n in enumerate(rn):
+            if n['tipo_nodo'].strip() == 'tee':
+                ref_rama.setdefault(n['punto'], (rama, n))
+    cuenta = {}
+    for rama, rn in ramas.items():
+        for j, n in enumerate(rn):
+            es_ref = rama != PRINCIPAL and n['punto'] in ref_rama and ref_rama[n['punto']][0] != rama and j in (0, len(rn) - 1)
+            if not es_ref:
+                cuenta[n['punto']] = cuenta.get(n['punto'], 0) + 1
+    if any(v > 1 for v in cuenta.values()):
+        stops.append('trazado_general.csv: nombres de punto repetidos: ' + ', '.join(k for k, v in cuenta.items() if v > 1))
+    for rama, rn in ramas.items():
+        if len(rn) < 2:
+            stops.append(f'rama {rama}: se necesitan al menos 2 nodos')
             continue
-        if prev_hasta is not None and abs(d - prev_hasta) > TOL_M:
-            stops.append(f"tramo {t['tramo']}: no empalma con el anterior (hasta {prev_hasta} frente a desde {d})")
-        prev_hasta = h
-        if num(t['DN_mm']) is None:
-            stops.append(f"tramo {t['tramo']}: DN no definido ('{t['DN_mm']}')")
-    p0, p1 = num(nodos[0]['progresiva_m']), num(nodos[-1]['progresiva_m'])
-    if tramos and p0 is not None and p1 is not None:
-        d0, h1 = num(tramos[0]['desde_m']), num(tramos[-1]['hasta_m'])
-        if d0 is not None and abs(d0 - p0) > TOL_M or h1 is not None and abs(h1 - p1) > TOL_M:
-            stops.append(f'la tabla cubre {d0}-{h1} m y el trazado {p0}-{p1} m')
+        if rama == PRINCIPAL:
+            continue
+        a = rn[0]
+        if a['punto'] not in ref_rama or ref_rama[a['punto']][0] == rama:
+            stops.append(f"rama {rama}: su primer nodo '{a['punto']}' debe ser un nodo tipo 'tee' de otra rama definida antes en el CSV")
+        else:
+            t0 = ref_rama[a['punto']][1]
+            if any(abs((num(a[c]) or 0) - (num(t0[c]) or 0)) > 1e-3 for c in ('X_m', 'Y_m', 'Z_eje_m')):
+                stops.append(f"rama {rama}: su primer nodo '{a['punto']}' no coincide en coordenadas con la tee de la rama {ref_rama[a['punto']][0]}")
+            elif list(ramas).index(ref_rama[a['punto']][0]) > list(ramas).index(rama):
+                stops.append(f"rama {rama}: la tee '{a['punto']}' esta en la rama {ref_rama[a['punto']][0]}, que aparece despues en el CSV; ordenar las ramas")
+        z = rn[-1]
+        if rama != PRINCIPAL and z['punto'] in ref_rama and ref_rama[z['punto']][0] != rama and z['tipo_nodo'].strip() != 'tee':
+            stops.append(f"rama {rama}: su ultimo nodo '{z['punto']}' repite una tee de otra rama (cierre de lazo) pero no es tipo 'tee'")
+        for n in rn[1:-1] if rama != PRINCIPAL else rn:
+            if n['tipo_nodo'].strip() == 'tee' and rama != PRINCIPAL and n['punto'] in ref_rama and ref_rama[n['punto']][0] != rama:
+                stops.append(f"rama {rama}: la tee '{n['punto']}' ya existe en la rama {ref_rama[n['punto']][0]}")
+    # tabla de tramos: estado, continuidad y cobertura, por rama (columna opcional 'rama'; vacia = PRINCIPAL)
+    tabla_r = {}
+    for t in tramos:
+        tabla_r.setdefault(rama_tramo(t), []).append(t)
+    for rama in ramas:
+        if rama not in tabla_r:
+            stops.append(f"tabla_tramos.csv: la rama {rama} no tiene tramos (columna 'rama')")
+    for rama, trs in tabla_r.items():
+        if rama not in ramas:
+            stops.append(f"tabla_tramos.csv: tramos de la rama {rama}, que no existe en el trazado")
+        prev_hasta = None
+        for t in trs:
+            if not t['estado'].strip().lower().startswith('vigente'):
+                stops.append(f"tramo {t['tramo']}: estado '{t['estado']}' (resolver la discrepancia en la compilacion de antecedentes antes de modelar)")
+            d, h = num(t['desde_m']), num(t['hasta_m'])
+            if d is None or h is None or h <= d:
+                stops.append(f"tramo {t['tramo']}: progresivas invalidas ({t['desde_m']}-{t['hasta_m']})")
+                continue
+            if prev_hasta is not None and abs(d - prev_hasta) > TOL_M:
+                stops.append(f"tramo {t['tramo']}: no empalma con el anterior (hasta {prev_hasta} frente a desde {d})")
+            prev_hasta = h
+            if num(t['DN_mm']) is None:
+                stops.append(f"tramo {t['tramo']}: DN no definido ('{t['DN_mm']}')")
+        if rama in ramas and trs:
+            p0, p1 = num(ramas[rama][0]['progresiva_m']), num(ramas[rama][-1]['progresiva_m'])
+            d0, h1 = num(trs[0]['desde_m']), num(trs[-1]['hasta_m'])
+            if p0 is not None and p1 is not None and (d0 is not None and abs(d0 - p0) > TOL_M or h1 is not None and abs(h1 - p1) > TOL_M):
+                stops.append(f'rama {rama}: la tabla cubre {d0}-{h1} m y el trazado {p0}-{p1} m')
+    # vigas de soporte
+    if any(n['tipo_nodo'].strip() == 'soporte_viga' for n in nodos):
+        v = cfg.get('soportes', {}).get('viga', {})
+        for sec, campos in (('seccion', ('nombre', 'profundidad_mm', 'ancho_mm', 'ala_mm', 'alma_mm')),
+                            ('material', ('nombre', 'E_MPa', 'poisson', 'densidad_kg_m3', 'dilatacion_1e6_por_C', 'fluencia_MPa', 'rotura_MPa')),
+                            ('guia', ('roce', 'gap_lateral_mm', 'gap_arriba_mm', 'gap_abajo_mm'))):
+            for c in campos:
+                if (v.get(sec) or {}).get(c) in (None, ''):
+                    stops.append(f'config_proyecto.json: hay nodos soporte_viga y falta soportes.viga.{sec}.{c} (el material de la viga es obligatorio: sin el la API guarda un .dat que no se reabre)')
+        for c in ('altura_viga_mm', 'suelo_a_eje_mm'):
+            if v.get(c) in (None, ''):
+                stops.append(f'config_proyecto.json: hay nodos soporte_viga y falta soportes.viga.{c}')
+        if not v.get('beta_offset_deg') and v.get('beta_offset_deg') != 0:
+            avisos.append('soportes.viga.beta_offset_deg no indicado: se usa 90 grados (alma colineal con el eje de la tuberia, supuesto sobre la convencion de ejes locales); verificar en vista solida')
     # clases y datos de la config
     clases = cfg.get('clases', {})
     for t in tramos:
@@ -185,7 +265,11 @@ def validar(cfg, nodos, tramos):
                 if p.get(campo) in (None, ''):
                     avisos.append(f"FALTANTE clase '{k}' propiedades.{campo}: {que} queda en 0")
     # un cambio de material en un mismo DN no inserta reductor: se informa
-    for a_, b_ in zip(tramos, tramos[1:]):
-        if es_hdpe(clave_clase(a_)) != es_hdpe(clave_clase(b_)):
-            avisos.append(f"cambio HDPE/otro material entre {a_['tramo']} y {b_['tramo']} (progresiva {a_['hasta_m']}): la skill no modela la union (brida, electrofusion, adaptador); definirla en la GUI")
+    for trs in tabla_r.values():
+        for a_, b_ in zip(trs, trs[1:]):
+            if es_hdpe(clave_clase(a_)) != es_hdpe(clave_clase(b_)):
+                avisos.append(f"cambio HDPE/otro material entre {a_['tramo']} y {b_['tramo']} (progresiva {a_['hasta_m']}): la skill no modela la union (brida, electrofusion, adaptador); definirla en la GUI")
+    for rama, rn in ramas.items():
+        if rama != PRINCIPAL and rn and rn[-1]['tipo_nodo'].strip() != 'tee':
+            avisos.append(f"rama {rama}: termina en un extremo libre ('{rn[-1]['punto']}'); sin anclaje salvo que se liste en soportes.anclajes_rigidos_en")
     return stops, list(dict.fromkeys(avisos))
