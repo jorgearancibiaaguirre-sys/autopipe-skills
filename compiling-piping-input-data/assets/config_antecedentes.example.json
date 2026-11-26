@@ -1,0 +1,9 @@
+{
+  "proyecto": "DEMO-001",
+  "carpeta_salida": "contexto",
+  "jerarquia_fuentes": ["trazado", "plano_perfil", "memoria"],
+  "datos_tomados_de_la_memoria": ["PN", "fluido", "presiones", "temperaturas"],
+  "datum": "por confirmar con el usuario",
+  "unidad_progresiva": "m",
+  "convencion_clase_en_nodo_limite": "tramo_que_termina"
+}
