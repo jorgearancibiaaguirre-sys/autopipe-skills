@@ -1,12 +1,16 @@
 ---
 name: building-autopipe-model-api
-description: Construye con la Python DataAPI de AutoPIPE un modelo .dat de una linea de tuberias HDPE (ASME B31.4) a partir de trazado_general.csv, tabla_tramos.csv y un config_proyecto.json; asigna pipe properties por clase, inserta reductores en los cambios de clase, define soportes de suelo, anclajes, casos presion/temperatura, sismo estatico y analysis sets, y verifica todo leyendo el archivo guardado. Usar cuando se pide generar o regenerar un modelo AutoPIPE por script, crear un .dat con la API, aplicar a un modelo cambios hechos en la GUI o verificar un .dat generado. Se detiene ante discrepancias abiertas, clases sin datos, materiales o ramas no soportados.
+description: Construye con la Python DataAPI de AutoPIPE un modelo .dat de una linea de tuberias HDPE o de acero (u otro material de la libreria, segun material y schedule que indica el usuario) a partir de trazado_general.csv, tabla_tramos.csv y un config_proyecto.json; asigna pipe properties por clase, inserta reductores en los cambios de DN, define soportes de suelo, anclajes, casos presion/temperatura, sismo estatico y analysis sets, y verifica todo leyendo el archivo guardado. Usar cuando se pide generar o regenerar un modelo AutoPIPE por script, crear un .dat con la API, aplicar a un modelo cambios hechos en la GUI o verificar un .dat generado. Se detiene ante discrepancias abiertas, clases sin datos o ramas no soportadas.
 ---
 
 # Construccion de modelos AutoPIPE por API
 
 ## Alcance (esta version)
-- Solo HDPE, una rama PRINCIPAL, nodos `extremo`, `soporte`, `vertice_trazado`, `punto`. Tees, ramales, valvulas, bridas, reducciones propias del trazado y acero **no estan implementados**: detenerse e informar; no improvisar.
+- Una rama PRINCIPAL, nodos `extremo`, `soporte`, `vertice_trazado`, `punto`. Tees, ramales, valvulas, bridas y reducciones propias del trazado **no estan implementados**: detenerse e informar; no improvisar.
+- Materiales por clase (`material|DN|PN` de la tabla de tramos):
+  - **HDPE** (la clave empieza con `HDPE`): material `NS`, propiedades de `material_hdpe` en la config.
+  - **Cualquier otro** (acero, etc.): el usuario indica `material_id` de AutoPIPE y `schedule` en la clase; AutoPIPE carga modulo, densidad y expansion de su libreria y la skill no las sobrescribe, salvo que la clase traiga `propiedades`. El OD y el espesor tambien los da el usuario: la API no los calcula desde el schedule.
+  - La union entre materiales distintos (brida, electrofusion) no se modela: queda como aviso.
 - Nunca analiza el modelo: el analisis lo corre el usuario en AutoPIPE.
 - Entradas, de la skill `compiling-piping-input-data` y del usuario: ver [reference/config_schema.md](reference/config_schema.md). Ejemplo: `assets/config_proyecto.example.json`.
 
@@ -40,6 +44,7 @@ Los scripts construyen modelos nuevos; para editar uno del usuario:
 ## Cuando detenerse y preguntar
 - Cualquier linea `DETENERSE Y PREGUNTAR` del preflight o del build.
 - Cambio de DN que cae justo en un nodo (no se sabe donde va el reductor).
+- Una clase que no es HDPE sin `material_id` o `schedule`: preguntar al usuario; no suponer A53-B ni STD.
 - Una limitacion de la API sin sustituto documentado (ver [reference/api_notas.md](reference/api_notas.md)).
 - El usuario pide sobrescribir, o pide algo fuera del alcance.
 

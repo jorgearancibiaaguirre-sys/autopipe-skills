@@ -1,0 +1,85 @@
+{
+    "proyecto":  "DEMO-001",
+    "ruta_dataapi":  "C:/Program Files/Bentley/AutoPIPE 2025/DataAPI",
+    "codigo":  {
+                   "edicion":  "2019",
+                   "libreria_materiales":  "B314-19"
+               },
+    "temperatura_montaje_C":  21,
+    "clases":  {
+                   "ACERO A53-B|150|CL150":  {
+                                                 "id":  "S150STD",
+                                                 "material_id":  "A53-B",
+                                                 "schedule":  "STD",
+                                                 "od_mm":  168.3,
+                                                 "espesor_mm":  7.11,
+                                                 "presion_operacion_MPa":  1.9,
+                                                 "radio_codo_en_diametros":  1.5
+                                             },
+                   "HDPE PE100|315|PN16":  {
+                                               "id":  "H315PN16",
+                                               "od_mm":  315,
+                                               "espesor_mm":  28.6,
+                                               "sdr":  11,
+                                               "presion_operacion_MPa":  0.5
+                                           }
+               },
+    "material_hdpe":  {
+                          "densidad_kg_m3":  950,
+                          "modulo_caliente_MPa":  700,
+                          "fluencia_MPa":  23,
+                          "poisson":  0.45,
+                          "coef_expansion_1e6_por_C":  null,
+                          "modulo_frio_MPa":  null
+                      },
+    "fluido":  {
+                   "densidad_kg_m3":  1000
+               },
+    "reductor_largo_mm":  400,
+    "discretizacion_m":  null,
+    "codo":  {
+                 "radio_en_diametros":  1.5,
+                 "factor_flexibilidad":  null
+             },
+    "casos":  [
+                  {
+                      "nombre":  "LLENO",
+                      "T_C":  5,
+                      "presion":  "clase",
+                      "contenido":  true
+                  },
+                  {
+                      "nombre":  "VACIO",
+                      "T_C":  -10,
+                      "presion":  0.0,
+                      "contenido":  false
+                  }
+              ],
+    "sismo_estatico_g":  {
+                             "E1_X":  0.35,
+                             "E2_Y":  0.35,
+                             "E3_Z":  0.5
+                         },
+    "soportes":  {
+                     "suelo":  {
+                                   "aplicar_en_tipos_nodo":  [
+                                                                 "extremo",
+                                                                 "soporte",
+                                                                 "vertice_trazado"
+                                                             ],
+                                   "en_intermedios":  true,
+                                   "roce":  0.6,
+                                   "gap_lateral_mm":  0,
+                                   "gap_arriba_mm":  5000,
+                                   "gap_abajo_mm":  0
+                               },
+                     "anclajes_rigidos_en":  "extremos"
+                 },
+    "analisis":  {
+                     "friction_scale_factor":  1.0,
+                     "fluid_density_factor_lleno":  1.0,
+                     "no_lineal":  false,
+                     "iteraciones":  30
+                 }
+}
+

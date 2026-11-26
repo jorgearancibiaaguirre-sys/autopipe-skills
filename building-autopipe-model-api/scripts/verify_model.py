@@ -48,27 +48,44 @@ def main():
         p = props.get(c['id'])
         ok = p is not None and near(p.outside_diameter * IN, c['od_mm'], 0.01) and near(p.wall_thickness * IN, c['espesor_mm'], 0.03)
         chk(f"pipe_property {c['id']}", ok, f'{p.outside_diameter * IN:.1f} x {p.wall_thickness * IN:.2f} mm' if p else 'no existe')
+        if p is not None:
+            if inputs.es_hdpe(k):
+                chk(f"pipe_property {c['id']}: material NS", p.material_id == 'NS', f'{p.material_id} (el schedule NS no se relee: la API lo devuelve vacio)')
+            else:
+                chk(f"pipe_property {c['id']}: material y schedule", p.material_id == str(c['material_id']) and p.schedule == str(c['schedule']), f'{p.material_id} / {p.schedule}')
     n_dn = sum(1 for t0, t1 in zip(tramos, tramos[1:]) if t0['DN_mm'] != t1['DN_mm'])
     nred = sum(1 for c in m.all_components if str(c.type).split('.')[-1] == 'REDUCER')
     chk('reductores = cambios de DN', nred == n_dn, f'{nred} de {n_dn}')
 
-    mat = cfg['material_hdpe']
-    E, SY = mat['modulo_caliente_MPa'] / MPA, mat['fluencia_MPa'] / MPA
+    # propiedades sobrescritas por clase (HDPE: material_hdpe; otro material: solo si la clase trae 'propiedades'); por id de pipe property
+    esperado = {cfg['clases'][k]['id']: inputs.props_clase(cfg, k, cfg['clases'][k]) for k in clases}
     casos = cfg['casos']
     pr_leidas = [set() for _ in casos]
     malos = {'hot': 0, 'yield': 0, 'temp': 0}
-    npts = 0
+    npts = nverif = nsin_clase = 0
     for q in (p for p in m.all_points if p.name):
         npts += 1
+        try:
+            mat = esperado.get(q.pipe_property.pipe_id, 'desconocida')
+        except Exception:
+            mat = 'desconocida'
+        if mat == 'desconocida':
+            nsin_clase += 1
         for ci, caso in enumerate(casos):
             L = q.pt_loads[ci]
-            malos['hot'] += not near(L.hot_modulus, E)
-            malos['yield'] += not near(L.yield_stress, SY)
             malos['temp'] += not near(L.temperature, caso['T_C'] * 9 / 5 + 32, 0.01)
             pr_leidas[ci].add(round(L.pressure * MPA, 3))
+            if mat and mat != 'desconocida':
+                nverif += 1
+                malos['hot'] += not near(L.hot_modulus, mat['modulo_caliente_MPa'] / MPA)
+                malos['yield'] += not near(L.yield_stress, mat['fluencia_MPa'] / MPA)
     chk('puntos con nombre', npts >= 2, str(npts))
-    for k, lbl in (('hot', 'modulo caliente (todos los casos)'), ('yield', 'fluencia (todos los casos, incluido el caso 1)'), ('temp', 'temperaturas por caso')):
+    for k, lbl in (('hot', 'modulo caliente (puntos con propiedades sobrescritas)'), ('yield', 'fluencia (idem, incluido el caso 1)'), ('temp', 'temperaturas por caso')):
         chk(lbl, malos[k] == 0, f'{malos[k]} lecturas fuera de tolerancia')
+    if nsin_clase:
+        print(f'AVISO: {nsin_clase} puntos sin pipe property legible: no se verifico su modulo ni su fluencia')
+    if nverif == 0:
+        print('AVISO: ningun punto con propiedades sobrescritas (material de libreria): modulo, fluencia y expansion NO verificados por la skill')
     for ci, caso in enumerate(casos):
         if caso['presion'] == 'clase':
             esperadas = {round(cfg['clases'][k]['presion_operacion_MPa'], 3) for k in clases}

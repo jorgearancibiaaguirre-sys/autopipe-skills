@@ -2,7 +2,7 @@
 
 Uso: python build_model.py --config C --trazado T --tabla R --base BASE.dat --out SALIDA.dat
 - Solo lee BASE.dat (trabaja sobre una copia) y se niega a escribir sobre un archivo existente.
-- Se detiene (codigo 2) ante cualquier condicion de inputs.validar: clase sin datos, discrepancia abierta, material o rama no soportados.
+- Se detiene (codigo 2) ante cualquier condicion de inputs.validar: clase sin datos, discrepancia abierta, rama no soportada, material no HDPE sin material_id/schedule.
 - Escribe SALIDA.dat y SALIDA.informe.md (supuestos, FALTANTES, sustituciones) y verifica al final con verify_model.py.
 Requisitos: Python 3.12, AutoPIPE con licencia, misma version del modelo base y de la DataAPI.
 """
@@ -65,7 +65,7 @@ def main():
         raise SystemExit(f'No se pudo abrir el modelo base: {e} (E4 = licencia; E0 = modelo de otra version)')
 
     # --- modelo
-    m.use_hdpe = True
+    m.use_hdpe = any(inputs.es_hdpe(inputs.clave_clase(t)) for t in tramos)
     m.piping_code_year = str(cfg['codigo']['edicion'])
     m.material_library = cfg['codigo']['libreria_materiales']
     Tm = float(cfg['temperatura_montaje_C'])
@@ -74,29 +74,40 @@ def main():
     m.pt_cases = len(casos)
     if cfg.get('proyecto'):
         m.project_id = cfg['proyecto']
-    mat = cfg['material_hdpe']
 
     # --- pipe properties, una por clase usada en la tabla
-    PP, CL = {}, {}
+    #   HDPE: material NS, schedule NS y propiedades de cfg['material_hdpe'] sobrescritas.
+    #   Otro material: material_id y schedule del usuario; AutoPIPE carga las propiedades de su libreria (no se sobrescriben salvo 'propiedades' de la clase).
+    PP, CL, MATC = {}, {}, {}
     for t in tramos:
         k = inputs.clave_clase(t)
         if k in PP:
             continue
         c = cfg['clases'][k]
         od, e = float(c['od_mm']), float(c['espesor_mm'])
-        kw = dict(pipe_id=c['id'], nominal_diameter=od * IN, outside_diameter=od * IN, wall_thickness=e * IN, material_id='NS', schedule='NS',
-                  material_density=mat['densidad_kg_m3'] * KGM3, poisson_ratio=mat['poisson'], is_hdpe_material=True)
-        if c.get('sdr'):
-            kw['dimension_ratio'] = str(c['sdr'])
-        if mat.get('modulo_frio_MPa'):
+        mat = inputs.props_clase(cfg, k, c)
+        MATC[k] = mat
+        if inputs.es_hdpe(k):
+            kw = dict(pipe_id=c['id'], nominal_diameter=od * IN, outside_diameter=od * IN, wall_thickness=e * IN, material_id='NS', schedule='NS',
+                      material_density=mat['densidad_kg_m3'] * KGM3, poisson_ratio=mat['poisson'], is_hdpe_material=True)
+            if c.get('sdr'):
+                kw['dimension_ratio'] = str(c['sdr'])
+        else:
+            kw = dict(pipe_id=c['id'], nominal_diameter=inputs.nps_clase(c, inputs.num(t['DN_mm'])), outside_diameter=od * IN, wall_thickness=e * IN,
+                      material_id=str(c['material_id']), schedule=str(c['schedule']))
+            if mat:
+                kw['material_density'] = mat['densidad_kg_m3'] * KGM3
+                kw['poisson_ratio'] = mat['poisson']
+        if mat and mat.get('modulo_frio_MPa'):
             kw['cold_modulus'] = mat['modulo_frio_MPa'] * MPA
         pp = m.add_pipe_property(**kw)
         di = od - 2 * e
         pp.content_weight = cfg['fluido']['densidad_kg_m3'] * KGM3 * math.pi * (di * IN) ** 2 / 4   # lb/in: densidad del fluido x area interior
         PP[k], CL[k] = pp, c
-        log(f"pipe property {c['id']} <- {k}: OD {od} mm, espesor {e} mm")
+        log(f"pipe property {c['id']} <- {k}: OD {od} mm, espesor {e} mm, material {kw['material_id']}, schedule {kw['schedule']}")
 
     tr = [(num(t['desde_m']), num(t['hasta_m']), inputs.clave_clase(t), float(t['DN_mm'])) for t in tramos]
+    DNC = {k: dn for _, _, k, dn in tr}      # DN por clase: el reductor se inserta cuando cambia el DN, no el OD
 
     def clase_en(p):
         for d, h, k, dn in tr:
@@ -137,7 +148,7 @@ def main():
             f = (p - p0) / L
             pos = tuple(P[i - 1][q] + f * (P[i][q] - P[i - 1][q]) for q in range(3))
             antes, despues = clase_en(p - 2 * inputs.TOL_M), clase_en(p + 2 * inputs.TOL_M)
-            dn_a, dn_d = CL[antes]['od_mm'], CL[despues]['od_mm']
+            dn_a, dn_d = DNC[antes], DNC[despues]
             if kind == 'limite' and dn_a != dn_d:
                 nred += 1
                 dirv = [(P[i][q] - P[i - 1][q]) / math.dist(P[i - 1], P[i]) for q in range(3)]
@@ -160,14 +171,15 @@ def main():
         od_seg = float(CL[k_seg]['od_mm'])
         es_vertice = tipo == 'vertice_trazado' and 0 < i < len(nodos) - 1
         if es_vertice:
-            b = cur.add_bend(name=n['punto'], position=P[i], radius=rcodo * od_seg * IN)
+            rc = float(CL[k_seg].get('radio_codo_en_diametros', rcodo))   # por clase si el usuario lo fija (p. ej. codo largo de acero = 1,5)
+            b = cur.add_bend(name=n['punto'], position=P[i], radius=rc * od_seg * IN)
             for ph in (b.near, b.mid, b.tangent, b.far):
                 try:
                     ph.pipe_property = PP[k_seg]
                 except Exception as e:
                     log(f"  ! pipe_property en un punto del codo {n['punto']}: {str(e)[:70]}")
                     break
-            if cfg['codo'].get('factor_flexibilidad'):
+            if cfg['codo'].get('factor_flexibilidad') and inputs.es_hdpe(k_seg):
                 b.flexibility_factor = float(cfg['codo']['factor_flexibilidad'])
             REG += [(b.near, k_seg, 'bend_near'), (b.mid, k_seg, 'bend_mid'), (b.far, k_seg, 'bend_far'), (b.tangent, k_seg, 'bend_vertex')]   # el punto de interseccion de tangentes (nombre del codo) tambien lleva P/T
             cur = b
@@ -181,6 +193,8 @@ def main():
     tipos_ok = set(s.get('aplicar_en_tipos_nodo', ['extremo', 'soporte', 'vertice_trazado']))
     nsup = 0
     for h, k, kind in REG:
+        if CL[k].get('sin_soporte_suelo'):
+            continue            # clase indicada por el usuario como no apoyada en suelo (p. ej. acero sobre soportes propios)
         aplica = (kind.startswith('nodo:') and kind[5:] in tipos_ok) or kind in ('bend_near', 'bend_far') or (kind == 'intermedio' and s.get('en_intermedios', True))
         if not aplica:
             continue
@@ -204,18 +218,20 @@ def main():
         if g.get(key):
             m.add_static_earthquake_load(seismic_code=SeismicCode.USER, direction=tuple(v * g[key] for v in vec), multiplication_factor=1.0)
             nq += 1
-    E, SY = mat['modulo_caliente_MPa'] * MPA, mat['fluencia_MPa'] * MPA
-    alfa = mat.get('coef_expansion_1e6_por_C')
     for h, k, kind in REG:
+        mat = MATC[k]
         for ci, caso in enumerate(casos):
             L = h.pt_loads[ci]
             L.temperature = fahr(caso['T_C'])
             pr = CL[k]['presion_operacion_MPa'] if caso['presion'] == 'clase' else float(caso['presion'])
             L.pressure = pr * MPA
+            if not mat:
+                continue        # material de la libreria: modulo, fluencia y expansion los da AutoPIPE; no se sobrescriben
             L.override_hot_modulus = True
-            L.hot_modulus = E
+            L.hot_modulus = mat['modulo_caliente_MPa'] * MPA
             L.override_yield_stress = True
-            L.yield_stress = SY
+            L.yield_stress = mat['fluencia_MPa'] * MPA
+            alfa = mat.get('coef_expansion_1e6_por_C')
             if alfa:
                 L.override_expansion = True
                 L.expansion = alfa * 1e-6 * (caso['T_C'] - Tm) * IN100FT

@@ -30,6 +30,7 @@
 - Modulo caliente y fluencia por caso: `pt_loads[k].override_hot_modulus = True` antes de `hot_modulus`; `override_yield_stress = True` antes de `yield_stress`.
 - Con una sola etapa (todo antes del primer `save`) el yield del caso 1 se leyo correctamente en las pruebas de la skill. En el proyecto de origen, aplicar las cargas despues de reabrir un modelo guardado dejo el yield del caso 1 en 0 y se corrigio con un parche binario del `.dat`; `verify_model.py` lo detecta y no se debe usar el parche sin confirmar el valor en la GUI.
 - `add_pipe_property(...)` acepta `dimension_ratio`, `is_hdpe_material`; la lectura posterior puede no devolver `is_hdpe_material` ni el SDR (campos que la GUI recalcula).
+- `add_pipe_property` con `material_id` y `schedule` (p. ej. `A53-B`, `STD`) no calcula OD ni espesor (leidos 0 si no se pasan) y no valida que el material ni el schedule existan (`XXXX` y `999` se aceptan): OD, espesor y la existencia del material se confirman en la GUI. Las propiedades de libreria no se leen por API (modulo y densidad salen 0 al leer). Un tubo HDPE `NS` devuelve schedule vacio al releer.
 - La API guarda siempre un archivo nuevo (`<nombre>_API_<n>.dat`); no sobrescribe.
 
 ## Limitaciones sin sustituto

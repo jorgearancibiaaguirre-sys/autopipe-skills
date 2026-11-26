@@ -28,8 +28,8 @@ Columnas: `tramo;desde_m;hasta_m;material;DN_mm;PN;fuente;estado`.
 | `ruta_dataapi` | no | Carpeta de la DataAPI; por defecto la instalacion estandar de AutoPIPE 2025 |
 | `codigo.edicion`, `codigo.libreria_materiales` | si | Edicion de ASME B31.4 y libreria de materiales (p. ej. `2019`, `B314-19`) |
 | `temperatura_montaje_C` | si | Temperatura de montaje |
-| `clases` | si | Una entrada por clave de clase: `id` (maximo 8 caracteres), `od_mm`, `espesor_mm`, `sdr` (opcional), `presion_operacion_MPa` |
-| `material_hdpe` | si | `densidad_kg_m3`, `modulo_caliente_MPa`, `fluencia_MPa`, `poisson`; opcionales `coef_expansion_1e6_por_C`, `modulo_frio_MPa` (si faltan: FALTANTE, quedan en 0) |
+| `clases` | si | Una entrada por clave de clase: `id` (maximo 8 caracteres), `od_mm`, `espesor_mm`, `presion_operacion_MPa`. HDPE: `sdr` (opcional). Otro material: ademas `material_id` y `schedule` (obligatorios) y opcionales `nps_in` (si el DN no esta en la correspondencia estandar), `propiedades`, `radio_codo_en_diametros`, `sin_soporte_suelo` |
+| `material_hdpe` | si hay clases HDPE | `densidad_kg_m3`, `modulo_caliente_MPa`, `fluencia_MPa`, `poisson`; opcionales `coef_expansion_1e6_por_C`, `modulo_frio_MPa` (si faltan: FALTANTE, quedan en 0) |
 | `fluido.densidad_kg_m3` | si | Para el peso del contenido |
 | `reductor_largo_mm` | si | Largo del reductor insertado en un cambio de DN |
 | `discretizacion_m` | no | Paso maximo entre puntos en tramos rectos (`null` = solo nodos del trazado) |
@@ -39,6 +39,15 @@ Columnas: `tramo;desde_m;hasta_m;material;DN_mm;PN;fuente;estado`.
 | `soportes.suelo` | si | `roce`, `gap_lateral_mm`, `gap_arriba_mm`, `gap_abajo_mm`, `aplicar_en_tipos_nodo`, `en_intermedios` |
 | `soportes.anclajes_rigidos_en` | no | `"extremos"` o lista de nombres de punto |
 | `analisis` | no | `friction_scale_factor`, `fluid_density_factor_lleno`, `no_lineal`, `iteraciones` |
+
+## Clases que no son HDPE
+- La clave de la clase es el `material` de la tabla de tramos (cualquier texto que no empiece con `HDPE`), por ejemplo `ACERO A53-B|150|CL150`.
+- `material_id`: id del material en la libreria de AutoPIPE (p. ej. `A53-B`); `schedule`: p. ej. `STD`, `40`. AutoPIPE carga de su libreria modulo, densidad y expansion segun ambos; la skill no las sobrescribe ni las verifica (se avisa). La API **no valida** que el material o el schedule existan: revisarlo en Pipe Properties.
+- `od_mm` y `espesor_mm` los da el usuario (la API no los deduce del schedule).
+- NPS: `nps_in` si se indica; si no, la correspondencia estandar DN->NPS (DN150 = 6", DN450 = 18"); un DN fuera de la tabla detiene el proceso.
+- `material_id` = `NS` (no estandar) exige `propiedades` con `densidad_kg_m3`, `modulo_caliente_MPa`, `fluencia_MPa`, `poisson` (opcionales `coef_expansion_1e6_por_C`, `modulo_frio_MPa`); con `propiedades` la skill las sobrescribe y las verifica como en HDPE.
+- Ejemplo mixto acero + HDPE: `assets/config_proyecto_mixto.example.json`.
+- El reductor se inserta cuando cambia el DN entre tramos, no cuando cambia el OD.
 
 Los valores del ejemplo son de un proyecto de demostracion; nunca los reutilice sin confirmarlos con el usuario.
 
