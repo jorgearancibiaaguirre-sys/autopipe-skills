@@ -8,7 +8,10 @@ Skills de Claude Code para analisis de flexibilidad de lineas de tuberias con Be
 | `building-autopipe-model-api` | Construye un modelo `.dat` HDPE (B31.4) con la DataAPI a partir de esos CSV y un `config_proyecto.json`; alcance: HDPE o acero/otro material por schedule, rama principal |
 | `auditing-autopipe-model` | Audita sin modificar un modelo leyendo el `.DB`, `.CHK` y logs |
 
+Guia de usuario (inputs, entregables, limites y precauciones): [GUIA_USUARIO.md](GUIA_USUARIO.md).
+
 Instalacion: copiar las carpetas a `~/.claude/skills/` (usuario) o `<proyecto>/.claude/skills/`.
 Requisitos: Python 3.12, AutoPIPE 2025 con licencia activa (solo para construir/verificar).
 Validadas solo con Sonnet; sin probar con Haiku/Opus ni en acero, tees o ramas.
+
 
