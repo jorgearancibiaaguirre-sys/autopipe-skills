@@ -9,7 +9,7 @@ description: Construye con la Python DataAPI de AutoPIPE un modelo .dat de una l
 - Una rama PRINCIPAL, nodos `extremo`, `soporte`, `vertice_trazado`, `punto`. Tees, ramales, valvulas, bridas y reducciones propias del trazado **no estan implementados**: detenerse e informar; no improvisar.
 - Materiales por clase (`material|DN|PN` de la tabla de tramos):
   - **HDPE** (la clave empieza con `HDPE`): material `NS`, propiedades de `material_hdpe` en la config.
-  - **Cualquier otro** (acero, etc.): el usuario indica `material_id` de AutoPIPE y `schedule` en la clase; AutoPIPE carga modulo, densidad y expansion de su libreria y la skill no las sobrescribe, salvo que la clase traiga `propiedades`. Si el usuario no da OD ni espesor, AutoPIPE los asigna desde su base segun NPS y schedule (la API los lee como 0: no se verifican y el peso del contenido queda FALTANTE); si los da, se escriben y se verifican.
+  - **Cualquier otro** (acero, etc.): el usuario indica `material_id` de AutoPIPE y `schedule` en la clase; AutoPIPE carga modulo, densidad y expansion de su libreria y la skill no las sobrescribe, salvo que la clase traiga `propiedades`. Si el usuario no da OD ni espesor, AutoPIPE los asigna desde su base segun NPS y schedule (la API los lee como 0: no se verifican); si los da, se escriben y se verifican.
   - La union entre materiales distintos (brida, electrofusion) no se modela: queda como aviso.
 - Nunca analiza el modelo: el analisis lo corre el usuario en AutoPIPE.
 - Entradas, de la skill `compiling-piping-input-data` y del usuario: ver [reference/config_schema.md](reference/config_schema.md). Ejemplo: `assets/config_proyecto.example.json`.

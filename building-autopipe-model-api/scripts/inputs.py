@@ -134,8 +134,8 @@ def validar(cfg, nodos, tramos):
             if any(hay) and not all(hay):
                 stops.append(f"clase '{k}': od_mm y espesor_mm van juntos (ambos o ninguno)")
             if not any(hay):
-                avisos.append(f"clase '{k}': sin od_mm/espesor_mm: AutoPIPE asigna OD y espesor desde su base segun NPS y schedule al abrir el modelo en la GUI; "
-                              "la skill no los escribe ni los verifica y NO puede escribir el peso del contenido (FALTANTE: ingresarlo en la GUI)")
+                avisos.append(f"clase '{k}': sin od_mm/espesor_mm: AutoPIPE asigna OD y espesor desde su base segun NPS y schedule; "
+                              "la skill no los escribe ni los verifica (revisar en Pipe Properties)")
         if len(str(c.get('id', ''))) > ID_MAX:
             stops.append(f"clase '{k}': id '{c.get('id')}' supera {ID_MAX} caracteres")
         if not es_hdpe(k):

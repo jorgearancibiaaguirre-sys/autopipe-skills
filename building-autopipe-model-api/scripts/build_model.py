@@ -21,6 +21,7 @@ import inputs  # noqa: E402
 IN = 1 / 25.4               # mm -> in (la API usa pulgadas, lb, psi y F)
 MPA = 145.0377377           # MPa -> psi
 KGM3 = 3.6127292e-5         # kg/m3 -> lb/in3
+KGM3_FT3 = 0.062427961      # kg/m3 -> lb/ft3
 IN100FT = 1200.0            # deformacion unitaria -> in/100 ft (100 ft = 1200 in)
 LOG = []
 
@@ -103,11 +104,7 @@ def main():
         if mat and mat.get('modulo_frio_MPa'):
             kw['cold_modulus'] = mat['modulo_frio_MPa'] * MPA
         pp = m.add_pipe_property(**kw)
-        if dims:
-            di = od - 2 * e
-            pp.content_weight = cfg['fluido']['densidad_kg_m3'] * KGM3 * math.pi * (di * IN) ** 2 / 4   # lb/in: densidad del fluido x area interior
-        else:
-            log(f"  ! {c['id']}: sin espesor no se puede escribir el peso del contenido (content_weight): ingresarlo en la GUI")
+        pp.content_weight = cfg['fluido']['densidad_kg_m3'] * KGM3_FT3   # en la API content_weight es la DENSIDAD del fluido (lb/ft3); AutoPIPE calcula el peso por longitud
         PP[k], CL[k] = pp, c
         log(f"pipe property {c['id']} <- {k}: " + (f'OD {od} mm, espesor {e} mm' if dims else f"NPS {kw['nominal_diameter']:g} in (OD y espesor: los asigna AutoPIPE)") + f", material {kw['material_id']}, schedule {kw['schedule']}")
 

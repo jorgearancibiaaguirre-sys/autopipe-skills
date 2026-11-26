@@ -52,6 +52,7 @@ def main():
             ok = p is not None and near(p.outside_diameter * IN, c['od_mm'], 0.01) and near(p.wall_thickness * IN, c['espesor_mm'], 0.03)
             chk(f"pipe_property {c['id']}", ok, f'{p.outside_diameter * IN:.1f} x {p.wall_thickness * IN:.2f} mm' if p else 'no existe')
         if p is not None:
+            chk(f"pipe_property {c['id']}: densidad del contenido", near(p.content_weight, cfg['fluido']['densidad_kg_m3'] * 0.062427961), f'{p.content_weight:.2f} lb/ft3 (el peso por longitud lo calcula AutoPIPE)')
             if inputs.es_hdpe(k):
                 chk(f"pipe_property {c['id']}: material NS", p.material_id == 'NS', f'{p.material_id} (el schedule NS no se relee: la API lo devuelve vacio)')
             else:

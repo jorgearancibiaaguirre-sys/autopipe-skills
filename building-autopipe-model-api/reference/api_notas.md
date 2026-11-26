@@ -21,6 +21,7 @@
 ## Semanticas que enganan
 - `LoadSet.pipe_contents`: **False = el set incluye el peso del contenido** (se confirmo comparando con el `.DB` de AutoPIPE: Contents_Weight_Included = Yes). El set lleno se escribe con False. Un modelo con el flag al reves da el mismo peso gravitacional en los dos sets.
 - `LoadSet.fluid_density_factor` y `friction_factor` valen 0 si no se asignan (avisos W2164-93 y W2143-76 del `.CHK`): asignarlos despues de `add_load_set`.
+- `PipeProperty.content_weight` es la **densidad del fluido en lb/ft3** (1000 kg/m3 = 62,43), no un peso por longitud: AutoPIPE calcula el peso por longitud con el diametro interior (6,195 lb/in en un DN450 PN16 con agua, contrastado con el modelo de origen). No necesita OD ni espesor para escribirse.
 - `pipe_id` se corta a 8 caracteres.
 - Renombrar un componente (`component.name`) no es renombrar su punto: son entidades distintas.
 - El nombre de un codo es su punto de interseccion de tangentes (`bend.tangent`); los puntos `near`, `mid`, `far` se nombran solos (`X N`, `X F`).
