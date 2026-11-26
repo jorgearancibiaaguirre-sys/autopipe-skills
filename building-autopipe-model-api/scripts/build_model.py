@@ -84,7 +84,8 @@ def main():
         if k in PP:
             continue
         c = cfg['clases'][k]
-        od, e = float(c['od_mm']), float(c['espesor_mm'])
+        dims = c.get('od_mm') not in (None, '') and c.get('espesor_mm') not in (None, '')
+        od, e = (float(c['od_mm']), float(c['espesor_mm'])) if dims else (None, None)
         mat = inputs.props_clase(cfg, k, c)
         MATC[k] = mat
         if inputs.es_hdpe(k):
@@ -93,18 +94,22 @@ def main():
             if c.get('sdr'):
                 kw['dimension_ratio'] = str(c['sdr'])
         else:
-            kw = dict(pipe_id=c['id'], nominal_diameter=inputs.nps_clase(c, inputs.num(t['DN_mm'])), outside_diameter=od * IN, wall_thickness=e * IN,
-                      material_id=str(c['material_id']), schedule=str(c['schedule']))
+            kw = dict(pipe_id=c['id'], nominal_diameter=inputs.nps_clase(c, inputs.num(t['DN_mm'])), material_id=str(c['material_id']), schedule=str(c['schedule']))
+            if dims:      # sin OD ni espesor, AutoPIPE los asigna desde su base segun NPS y schedule
+                kw.update(outside_diameter=od * IN, wall_thickness=e * IN)
             if mat:
                 kw['material_density'] = mat['densidad_kg_m3'] * KGM3
                 kw['poisson_ratio'] = mat['poisson']
         if mat and mat.get('modulo_frio_MPa'):
             kw['cold_modulus'] = mat['modulo_frio_MPa'] * MPA
         pp = m.add_pipe_property(**kw)
-        di = od - 2 * e
-        pp.content_weight = cfg['fluido']['densidad_kg_m3'] * KGM3 * math.pi * (di * IN) ** 2 / 4   # lb/in: densidad del fluido x area interior
+        if dims:
+            di = od - 2 * e
+            pp.content_weight = cfg['fluido']['densidad_kg_m3'] * KGM3 * math.pi * (di * IN) ** 2 / 4   # lb/in: densidad del fluido x area interior
+        else:
+            log(f"  ! {c['id']}: sin espesor no se puede escribir el peso del contenido (content_weight): ingresarlo en la GUI")
         PP[k], CL[k] = pp, c
-        log(f"pipe property {c['id']} <- {k}: OD {od} mm, espesor {e} mm, material {kw['material_id']}, schedule {kw['schedule']}")
+        log(f"pipe property {c['id']} <- {k}: " + (f'OD {od} mm, espesor {e} mm' if dims else f"NPS {kw['nominal_diameter']:g} in (OD y espesor: los asigna AutoPIPE)") + f", material {kw['material_id']}, schedule {kw['schedule']}")
 
     tr = [(num(t['desde_m']), num(t['hasta_m']), inputs.clave_clase(t), float(t['DN_mm'])) for t in tramos]
     DNC = {k: dn for _, _, k, dn in tr}      # DN por clase: el reductor se inserta cuando cambia el DN, no el OD
@@ -168,7 +173,8 @@ def main():
                 cur.pipe_property = PP[antes]
                 REG.append((cur, antes, 'intermedio' if kind == 'intermedio' else 'nodo:punto'))
         k_seg = clase_en((p0 + p1) / 2)
-        od_seg = float(CL[k_seg]['od_mm'])
+        # radio del codo: HDPE en multiplos del OD; otro material en multiplos del diametro nominal (codo largo de acero = 1,5 NPS)
+        od_seg = float(CL[k_seg]['od_mm']) if inputs.es_hdpe(k_seg) else inputs.nps_clase(CL[k_seg], DNC[k_seg]) * 25.4
         es_vertice = tipo == 'vertice_trazado' and 0 < i < len(nodos) - 1
         if es_vertice:
             rc = float(CL[k_seg].get('radio_codo_en_diametros', rcodo))   # por clase si el usuario lo fija (p. ej. codo largo de acero = 1,5)

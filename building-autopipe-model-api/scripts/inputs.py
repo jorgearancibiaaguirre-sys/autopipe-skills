@@ -124,9 +124,18 @@ def validar(cfg, nodos, tramos):
         if c is None:
             stops.append(f"clase '{k}' (tramo {t['tramo']}) no esta en config_proyecto.json > clases: falta OD, espesor, id y presion")
             continue
-        for campo in ('id', 'od_mm', 'espesor_mm', 'presion_operacion_MPa'):
+        # HDPE: OD y espesor obligatorios. Otro material: opcionales; sin ellos AutoPIPE asigna OD y espesor desde su base segun NPS y schedule
+        campos = ('id', 'presion_operacion_MPa') if not es_hdpe(k) else ('id', 'od_mm', 'espesor_mm', 'presion_operacion_MPa')
+        for campo in campos:
             if c.get(campo) in (None, ''):
                 stops.append(f"clase '{k}': falta {campo}")
+        if not es_hdpe(k):
+            hay = [c.get(x) not in (None, '') for x in ('od_mm', 'espesor_mm')]
+            if any(hay) and not all(hay):
+                stops.append(f"clase '{k}': od_mm y espesor_mm van juntos (ambos o ninguno)")
+            if not any(hay):
+                avisos.append(f"clase '{k}': sin od_mm/espesor_mm: AutoPIPE asigna OD y espesor desde su base segun NPS y schedule al abrir el modelo en la GUI; "
+                              "la skill no los escribe ni los verifica y NO puede escribir el peso del contenido (FALTANTE: ingresarlo en la GUI)")
         if len(str(c.get('id', ''))) > ID_MAX:
             stops.append(f"clase '{k}': id '{c.get('id')}' supera {ID_MAX} caracteres")
         if not es_hdpe(k):

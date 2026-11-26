@@ -46,8 +46,11 @@ def main():
     for k in sorted(clases):
         c = cfg['clases'][k]
         p = props.get(c['id'])
-        ok = p is not None and near(p.outside_diameter * IN, c['od_mm'], 0.01) and near(p.wall_thickness * IN, c['espesor_mm'], 0.03)
-        chk(f"pipe_property {c['id']}", ok, f'{p.outside_diameter * IN:.1f} x {p.wall_thickness * IN:.2f} mm' if p else 'no existe')
+        if c.get('od_mm') in (None, ''):     # material de libreria sin dimensiones: las asigna AutoPIPE en la GUI y la API las lee como 0
+            chk(f"pipe_property {c['id']}", p is not None, 'existe; OD y espesor NO verificados (los asigna AutoPIPE segun NPS y schedule)' if p else 'no existe')
+        else:
+            ok = p is not None and near(p.outside_diameter * IN, c['od_mm'], 0.01) and near(p.wall_thickness * IN, c['espesor_mm'], 0.03)
+            chk(f"pipe_property {c['id']}", ok, f'{p.outside_diameter * IN:.1f} x {p.wall_thickness * IN:.2f} mm' if p else 'no existe')
         if p is not None:
             if inputs.es_hdpe(k):
                 chk(f"pipe_property {c['id']}: material NS", p.material_id == 'NS', f'{p.material_id} (el schedule NS no se relee: la API lo devuelve vacio)')
